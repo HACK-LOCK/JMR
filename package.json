@@ -1,0 +1,35 @@
+{
+  "name": "jai-mataji-repair-shop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Mobile & Electronics Repair Shop Management - simple mobile-first PWA",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,APP -c cyan,magenta \"npm:dev:api\" \"npm:dev:app\"",
+    "dev:api": "npm run dev --workspace backend",
+    "dev:app": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "start": "npm run start --workspace backend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
+    "test": "npm run test:render && npm run test:api",
+    "test:render": "npm run check:render --workspace frontend",
+    "test:api": "node backend/scripts/run-api-tests.mjs",
+    "test:smoke": "node backend/scripts/smoke.mjs",
+    "test:e2e": "node backend/scripts/e2e.mjs",
+    "setup": "npm install && npm run build",
+    "seed": "npm run seed --workspace backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

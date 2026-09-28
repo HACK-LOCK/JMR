@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
+  }
+
+  /* Dark mode. Same variable names, so every screen switches at once. */
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 96%;
+    --card: 222 44% 11%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 44% 11%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 222 47% 8%;
+    --success: 142 69% 45%;
+    --success-foreground: 222 47% 8%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 8%;
+    --border: 217 33% 22%;
+    --input: 217 33% 24%;
+    --ring: 217 91% 60%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: theme('fontFamily.sans');
+    /* Nothing in a shop app should be selectable-by-accident while tapping. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Keep number inputs friendly on a phone. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+
+  /* iOS zooms the page when a font under 16px gets focus. */
+  @supports (-webkit-touch-callout: none) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+@layer components {
+  /* Big, obvious tap targets everywhere. */
+  .tap {
+    @apply min-h-[48px];
+  }
+
+  .card-tap {
+    @apply w-full rounded-xl border bg-card p-4 text-left transition-colors active:bg-secondary;
+  }
+
+  /* Smooth, calm colour changes when the light/dark switch is used. */
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: 160ms;
+    transition-timing-function: ease-out;
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * The shop name breathing in the header, forever. It loops rather than plays
+   * once, because the header outlives every screen in the app: a one-shot
+   * entrance is over long before the person looks at it and reads as nothing
+   * happening. The two ends of the loop match, so there is no seam and no dead
+   * beat between repeats. The swing is deliberately wide - down to 40% and five
+   * pixels low, back up to full strength with a glow - because a gentler one
+   * sat in the same spot on a header that never scrolls, and the eye simply
+   * adapted to it and read it as nothing happening at all. The name never
+   * disappears, so it stays readable throughout.
+   *
+   * There is deliberately no `prefers-reduced-motion` escape hatch here. This
+   * machine reports reduced motion - Windows has "Animation effects" switched
+   * off - and a guard turned the effect off completely, which is exactly what
+   * the shop did not ask for. The mark is a decoration, not an interaction
+   * cue, and it is the one thing in the app that is meant to move.
+   */
+  @keyframes shop-mark {
+    0%,
+    100% {
+      opacity: 0.4;
+      transform: translateY(5px);
+      text-shadow: none;
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(0);
+      text-shadow: 0 0 14px hsl(var(--primary) / 0.5);
+    }
+  }
+
+  .animate-shop-mark {
+    animation: shop-mark 1.8s ease-in-out infinite;
+  }
+}

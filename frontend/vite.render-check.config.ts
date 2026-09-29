@@ -8,6 +8,11 @@ import path from 'node:path';
  * the browser.
  */
 export default defineConfig({
+  // The app reads this in Settings to show which build is loaded. It has to be
+  // declared here too, or Settings throws when the render check imports it.
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [react()],
   resolve: {
     alias: {

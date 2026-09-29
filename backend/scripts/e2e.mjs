@@ -10,6 +10,13 @@ import zlib from 'node:zlib';
 
 const BASE = process.env.API_BASE ?? process.env.BASE ?? 'http://localhost:4000';
 
+/**
+ * The PIN the throwaway test server was given, so the checks read it from the
+ * runner instead of hard coding it. That is what keeps the shop's own PIN out
+ * of this file and out of the test output.
+ */
+const TEST_PIN = process.env.STOCK_PIN ?? '';
+
 let token = '';
 let passed = 0;
 let failed = 0;
@@ -766,6 +773,42 @@ async function main() {
   section('Bill numbers stay continuous');
   const highest = ids.filter((id) => id.startsWith('JMR-')).sort().pop();
   check('the history only contains JMR bill numbers', highest !== undefined && /^JMR-\d{4,}$/.test(highest), ids.slice(0, 5));
+
+  section('The shop PIN');
+  // One shared number opens the Stock area and the hidden dashboard figures.
+  // The rules below are what a counter actually hits: a mistyped letter, too few
+  // digits, and the correct number.
+  const pinUnlocked = await call('POST', '/auth/stock/unlock', { pin: TEST_PIN });
+  check('the shop PIN opens the Stock area', pinUnlocked.status === 200, pinUnlocked.json?.data);
+
+  const pinVerified = await call('POST', '/auth/pin/verify', { pin: TEST_PIN });
+  check('the shop PIN brings back the hidden figures', pinVerified.status === 200, pinVerified.json?.data);
+
+  const pinWrong = await call('POST', '/auth/stock/unlock', { pin: '0000' });
+  check('a wrong PIN is rejected', pinWrong.status === 401, { status: pinWrong.status });
+
+  const pinLetters = await call('POST', '/auth/pin/verify', { pin: 'abcd' });
+  check(
+    'letters in the PIN are rejected',
+    pinLetters.status === 422,
+    { status: pinLetters.status, message: pinLetters.json?.error?.message },
+  );
+
+  const pinShort = await call('POST', '/auth/pin/verify', { pin: '246' });
+  check(
+    'a PIN under 4 digits is rejected',
+    pinShort.status === 422,
+    { status: pinShort.status, message: pinShort.json?.error?.message },
+  );
+
+  // The pin/verify endpoint must not be a second way into the Stock area, or
+  // bringing back a hidden figure would quietly unlock the whole stock screen.
+  const verifyDoesNotUnlock = await call('POST', '/auth/pin/verify', { pin: TEST_PIN });
+  check(
+    'verifying the PIN does not report an unlock',
+    verifyDoesNotUnlock.json?.data?.unlocked === undefined,
+    verifyDoesNotUnlock.json?.data,
+  );
 
   section('Password change');
   const wrongCurrent = await call('PATCH', '/auth/password', {

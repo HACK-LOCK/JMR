@@ -22,6 +22,23 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     reloading = true;
     window.location.reload();
   });
+
+  /*
+   * A service worker is only re-checked when the page navigates, and a counter
+   * phone is left open on one screen all day. So the app could sit on the build
+   * from this morning while the server was already serving the afternoon one -
+   * which looks exactly like the change not having worked. Asking for the new
+   * worker on a timer means the reload above happens on its own, and the app
+   * updates itself within a few minutes of a deploy.
+   */
+  window.setInterval(() => {
+    void navigator.serviceWorker
+      .getRegistration()
+      .then((registration) => registration?.update())
+      .catch(() => {
+        // Offline or the worker is being replaced right now. Try again next tick.
+      });
+  }, 3 * 60_000);
 }
 registerSW({ immediate: true });
 

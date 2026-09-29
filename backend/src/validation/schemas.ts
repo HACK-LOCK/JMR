@@ -222,9 +222,19 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Enter your password'),
 });
 
-/** The PIN typed on the Stock lock screen. Checked on the server only. */
+/**
+ * The PIN typed on the Stock lock screen and on the hidden-figures prompt.
+ * Checked on the server only.
+ *
+ * Digits only, because the phone opens a digits-only keypad for these boxes.
+ * That is what makes a 4-digit PIN quick to enter at a counter, and it also means
+ * a PIN can never be a word someone has to spell out on an alphabet keyboard.
+ */
 export const stockUnlockSchema = z.object({
-  pin: trimmed.min(1, 'Enter the PIN').max(20),
+  pin: trimmed
+    .regex(/^\d+$/, 'The PIN is the shop number, digits only')
+    .min(4, 'The PIN is at least 4 digits')
+    .max(12, 'The PIN is at most 12 digits'),
 });
 
 /** Self-service password change: you must prove you know the current one. */

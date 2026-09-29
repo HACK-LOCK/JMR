@@ -159,7 +159,7 @@ Create a `.env` file in the project root to change any of it.
 | `OWNER_PASSWORD` | `shop1234` | First login — **change this** |
 | `DATA_DIR` | `backend/.data` | Where the local database file lives |
 | `ALLOW_NEGATIVE_STOCK` | `false` | Allow stock to go below zero |
-| `STOCK_PIN` | — | PIN for JMR — STOCK. If empty, your own account password is accepted |
+| `STOCK_PIN` | — | Shared shop PIN, 4-12 digits. Required. Opens JMR — STOCK and the hidden dashboard figures |
 | `STOCK_PIN_TTL_MINUTES` | `120` | How long the Stock area stays open |
 | `STOCK_PIN_MAX_ATTEMPTS` | `5` | Wrong tries before a short cool-down |
 | `CORS_ORIGINS` | — | Extra origins allowed to call the API |
@@ -185,8 +185,10 @@ Other accounts are added in the same screen.
 created for the first time. Changing them later has no effect — use the app.
 
 **The Stock PIN** is checked by the server only — it is never stored in the
-browser. Setting `STOCK_PIN` to a short number is the quickest way in; leaving
-it empty means the person signs in with their normal password instead.
+browser. It is one shared number, 4 to 12 digits, and it opens every locked
+screen in the app: the Stock area, and the hidden figures on the billing
+dashboard. It has to be set — if it is blank the app says so instead of quietly
+accepting an account password, so there is only ever one kind of thing to type.
 
 ---
 

@@ -49,23 +49,23 @@ function clearPinFailures(userId: string): void {
  * Checks the shop's own PIN, shared with the Stock lock, and keeps the tap
  * through guard on it. Throws when the PIN is wrong, so a caller cannot forget
  * to count the failure.
+ *
+ * There is no fallback to the person's account password any more. The phone
+ * opens a digits-only keypad for this box, which only makes sense if the shop
+ * really has a number, and a lock that quietly accepts a second kind of
+ * credential is harder to reason about than one rule.
  */
 async function verifyShopPin(userId: string, pin: string): Promise<void> {
   assertPinNotLocked(userId);
 
-  // A shared shop PIN when the owner set one, otherwise the person's own
-  // account password. Either way the check happens here, on the server, and
-  // the answer sent back is the same for a wrong PIN and a wrong account.
   const sharedPin = env.stockPin;
-  let ok = false;
-  if (sharedPin) {
-    ok = safeEqual(pin, sharedPin);
-  } else {
-    const user = await userStore.findById(userId);
-    ok = Boolean(user && (await userStore.verifyPassword(user, pin)));
+  if (!sharedPin) {
+    // Misconfiguration, not a wrong guess. Say so plainly: the owner has to set
+    // STOCK_PIN, and telling them "wrong PIN" would send them round in circles.
+    throw new AuthError('The shop PIN is not set. Ask the person who set up the app.');
   }
 
-  if (!ok) {
+  if (!safeEqual(pin, sharedPin)) {
     recordPinFailure(userId);
     throw new AuthError('Wrong PIN.');
   }

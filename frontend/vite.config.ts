@@ -4,6 +4,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
 
 export default defineConfig({
+  // Stamped into the bundle at build time and shown in Settings, so "am I on
+  // the new version?" is answered by looking at the app instead of guessing.
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({

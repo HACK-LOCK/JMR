@@ -34,6 +34,18 @@ function run(command, args, options = {}) {
 }
 
 /**
+ * How to rebuild the backend without going through a shell.
+ *
+ * Spawning "npm" or "npm.cmd" here is not portable: bare "npm" is ENOENT on
+ * Windows, and current Node refuses to spawn a .cmd at all without a shell
+ * (EINVAL), so the build step simply could not run. Running the project's own
+ * tsc through `node` avoids both problems and is the same compiler and the same
+ * tsconfig that `npm run build --workspace backend` uses.
+ */
+const TSC = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+const BACKEND_TSCONFIG = path.join(repoRoot, 'backend', 'tsconfig.build.json');
+
+/**
  * The PIN the throwaway server is given. It belongs to the test run only, so the
  * checks neither read nor print the PIN the shop actually uses.
  */
@@ -72,9 +84,14 @@ async function waitForHealth(port) {
 }
 
 async function ensureBuilt() {
-  if (fs.existsSync(serverEntry)) return;
-  console.log('Backend not built yet - building it first...');
-  const code = await run('npm', ['run', 'build', '--workspace', 'backend'], { cwd: repoRoot });
+  // Always rebuild. This used to build only when dist was missing, which meant a
+  // second run of `npm test` after an edit tested the PREVIOUS build and passed
+  // while proving nothing about the change just made. A test run that can report
+  // success against old code is worse than no test run at all, because it looks
+  // like the change was verified. A few seconds of build is a cheap price for
+  // knowing the suites ran against what is actually in the source tree.
+  console.log('Building the backend, so the suites run against the current source...');
+  const code = await run(process.execPath, [TSC, '-p', BACKEND_TSCONFIG], { cwd: repoRoot });
   if (code !== 0 || !fs.existsSync(serverEntry)) {
     throw new Error('Backend build failed, so the tests cannot run.');
   }

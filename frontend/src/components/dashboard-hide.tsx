@@ -138,7 +138,10 @@ export function UnhideSheet({
             autoComplete="off"
             autoFocus
             value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\s/g, '').slice(0, 20))}
+            // Digits only, and it stays masked - see the note in stock-gate.tsx
+            // about why numberPad is not spread into a password field.
+            pattern="[0-9]*"
+            onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 12))}
             placeholder="Enter PIN"
             invalid={Boolean(error)}
             className="tabular h-14 text-center text-xl tracking-[0.2em]"

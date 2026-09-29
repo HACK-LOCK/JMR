@@ -65,10 +65,14 @@ export function StockGate(): JSX.Element {
               autoComplete="off"
               autoFocus
               value={pin}
-              // Letters are allowed on purpose: if the shop has not set its own
-              // PIN, the server also accepts the person's account password,
-              // and a numeric-only box would make that impossible to type.
-              onChange={(event) => setPin(event.target.value.replace(/\s/g, '').slice(0, 20))}
+              // Digits only. `numberPad` is not spread here on purpose: it sets
+              // type="text", which would show the PIN on screen. A password field
+              // with inputMode numeric gives the numeric keypad on Android, and
+              // iOS shows its own password keyboard either way - the digits are
+              // stripped below, so it still works, just with a keyboard switch.
+              inputMode="numeric"
+              pattern="[0-9]*"
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 12))}
               placeholder="Enter PIN"
               invalid={Boolean(error)}
               className={cn('h-14 text-center text-xl tracking-[0.2em]', 'tabular')}

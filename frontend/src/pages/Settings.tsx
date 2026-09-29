@@ -301,6 +301,15 @@ export default function Settings(): JSX.Element {
         </p>
       ) : null}
 
+      {/*
+        Which build is actually on this screen. The app updates itself in the
+        background, so "the change did not show up" is usually an old build still
+        open - and this answers that in one glance instead of by guessing.
+      */}
+      <p className="text-center text-2xs text-muted-foreground">
+        App version {dateTime(__BUILD_TIME__)}
+      </p>
+
       <Button variant="outline" className="w-full gap-2" onClick={signOut}>
         <LogOut className="h-5 w-5" /> Sign out
       </Button>

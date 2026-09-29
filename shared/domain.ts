@@ -119,6 +119,42 @@ export type DeviceType = (typeof DEVICE_TYPES)[number];
 export const DEVICE_CONDITIONS = ['Good', 'Fair', 'Broken', 'Damaged'] as const;
 export type DeviceCondition = (typeof DEVICE_CONDITIONS)[number];
 
+/**
+ * The faults this shop is asked to fix, in the order the counter tends to see
+ * them. Offered as suggestions while the problem is typed, so a bill says
+ * "Charging Socket (CC) Change" rather than however that was spelled that day -
+ * which is what makes the history searchable and the printed bill readable.
+ *
+ * Not a closed list: the problem is free text, and anything a customer actually
+ * says is kept word for word. "Other Problem" is the named fallback for the
+ * faults that are not on the list.
+ */
+export const COMMON_PROBLEMS = [
+  'Display Change',
+  'Folder Change',
+  'Body Frame Change',
+  'Back Body Change',
+  'Charging Socket (CC) Change',
+  'Mic Problem',
+  'Speaker / Ringer Problem',
+  'Power On/Off Switch Problem',
+  'Volume Up Button Problem',
+  'Volume Down Button Problem',
+  'Battery Problem',
+  'Software Problem',
+  'Software Lock Problem',
+  'FRP Problem',
+  'Network Problem',
+  'Camera Problem',
+  'CPU Problem',
+  'Motherboard Problem',
+  'Water Damage',
+] as const;
+export type CommonProblem = (typeof COMMON_PROBLEMS)[number];
+
+/** The fallback label kept out of the suggestion list until nothing else fits. */
+export const OTHER_PROBLEM = 'Other Problem';
+
 export const USER_ROLES = ['OWNER', 'STAFF'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -468,7 +504,13 @@ export interface DashboardData {
   lowStockItems: (Part & { low: boolean })[];
 }
 
-export type SyncMode = 'local' | 'sheets';
+/**
+ * Where the bills live.
+ *   local    - a JSON file on this computer
+ *   sheets   - mirrored to a Google spreadsheet
+ *   postgres - the online database, which is the real store
+ */
+export type SyncMode = 'local' | 'sheets' | 'postgres';
 
 export interface SyncStatus {
   mode: SyncMode;

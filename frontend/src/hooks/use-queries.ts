@@ -6,6 +6,7 @@ import type {
   DatasetLabels,
   BillHistory,
   CustomerHistoryRow,
+  DeviceHints,
   OrderDateReport,
   OrderDetail,
   OrderListItem,
@@ -165,12 +166,17 @@ export const useSettings = () =>
   useQuery({
     queryKey: ['settings'],
     queryFn: ({ signal }) => unwrap<ShopSettings>('/settings', signal),
+    // Not polled: the shop details are edited in a form, and a timer that
+    // reloaded the row underneath would fight whoever is typing in it.
+    refetchInterval: false,
   });
 
 export const useSyncStatus = () =>
   useQuery({
     queryKey: ['sync', 'status'],
     queryFn: ({ signal }) => unwrap<SyncStatus>('/sync/status', signal),
+    // Slow: the screen only needs to notice a new connection or a finished
+    // copy, and this is a screen the owner leaves open.
     refetchInterval: 60_000,
   });
 
@@ -178,6 +184,21 @@ export const useSyncDatasets = () =>
   useQuery({
     queryKey: ['sync', 'datasets'],
     queryFn: ({ signal }) => unwrap<DatasetLabels[]>('/sync/datasets', signal),
+  });
+
+/**
+ * Brands and models this shop has repaired, for the new bill screen.
+ *
+ * Fetched whole and filtered in the browser rather than per keystroke, so
+ * typing a model name never waits on a round trip. Slow to go stale, because
+ * the shop's own history does not change while a bill is being written, and a
+ * brand written on a new bill only needs to be there next time.
+ */
+export const useDeviceHints = () =>
+  useQuery({
+    queryKey: ['orders', 'device-hints'],
+    queryFn: ({ signal }) => unwrap<DeviceHints>('/orders/device-hints', signal),
+    staleTime: 5 * 60_000,
   });
 
 /**
@@ -231,6 +252,9 @@ export const useUsers = () =>
   useQuery({
     queryKey: ['users'],
     queryFn: ({ signal }) => unwrap<AuthUser[]>('/auth/users', signal),
+    // Not polled: the list is short, it only changes when somebody adds or
+    // turns off an account, and it is shown inside a form.
+    refetchInterval: false,
   });
 
 /* ------------------------------------------------------------------ */

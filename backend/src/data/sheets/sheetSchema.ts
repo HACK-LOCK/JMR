@@ -1,4 +1,5 @@
-import type { ConsumeMode, DatasetKey, PaymentMode } from '../../../../shared/domain';
+import { balanceAmount, type ConsumeMode, type DatasetKey, type PaymentMode } from '../../../../shared/domain';
+import type { Database } from '../database';
 
 export type ColumnType = 'string' | 'number' | 'bool' | 'list';
 
@@ -206,6 +207,33 @@ export const ALL_TABLES: TableDef[] = [
 
 export type TableKey = DatasetKey | keyof typeof EXTRA_TABLES;
 
+/** Every tab plus the settings row, i.e. the whole workbook's worth of data. */
+export const MIRROR_SHEETS: string[] = [...ALL_TABLES.map((table) => table.sheet), 'Settings'];
+
+/** The rows a tab holds, whichever way they are named in the workbook. */
+export function rowsForSheet(db: Database, sheet: string): Record<string, unknown>[] {
+  switch (sheet) {
+    case 'Customers':
+      return db.customers as unknown as Record<string, unknown>[];
+    case 'Orders':
+      return db.orders as unknown as Record<string, unknown>[];
+    case 'Payments':
+      return db.payments as unknown as Record<string, unknown>[];
+    case 'Parts':
+      return db.parts as unknown as Record<string, unknown>[];
+    case 'Order Parts':
+      return db.orderParts as unknown as Record<string, unknown>[];
+    case 'Stock Movements':
+      return db.stockMovements as unknown as Record<string, unknown>[];
+    case 'Suppliers':
+      return db.suppliers as unknown as Record<string, unknown>[];
+    case 'Status History':
+      return db.statusHistory as unknown as Record<string, unknown>[];
+    default:
+      return [];
+  }
+}
+
 /** Settings tab: field names across the top, values underneath (easy to edit by hand). */
 export const SETTINGS_COLUMNS: string[] = [
   'Shop Name',
@@ -291,8 +319,36 @@ export function rowToRecord<T extends Record<string, unknown>>(
   return record as T;
 }
 
-export function recordToRow(table: TableDef, record: Record<string, unknown>): (string | number | boolean)[] {
-  return table.columns.map((column) => encodeCell(record[column.field], column.type));
+export function recordToRow(
+  table: TableDef,
+  record: Record<string, unknown>,
+  derived?: Record<string, unknown>,
+): (string | number | boolean)[] {
+  return table.columns.map((column) => {
+    const value = derived && column.field in derived ? derived[column.field] : record[column.field];
+    return encodeCell(value, column.type);
+  });
+}
+
+/**
+ * Columns the app works out rather than stores, keyed by the row's stable id.
+ *
+ * The Orders tab carries a Balance, which is not a field on a bill: the database
+ * holds the final amount, the discount and the advance, and the balance is the
+ * difference. A mirror writes every column of a row, so without this the write
+ * would put an empty cell over the balance the owner is reading - it would look
+ * like every bill was fully paid.
+ *
+ * The formula is the app's own `balanceAmount`, not a second one written here,
+ * so the sheet and the app can never disagree about what is owed.
+ */
+export function derivedCellsFor(sheet: string, db: Database): Map<string, Record<string, unknown>> {
+  const derived = new Map<string, Record<string, unknown>>();
+  if (sheet !== 'Orders') return derived;
+  for (const order of db.orders) {
+    derived.set(order.id, { balance: balanceAmount(order) });
+  }
+  return derived;
 }
 
 /** Normalise free text typed by a human in a spreadsheet cell. */

@@ -335,6 +335,11 @@ export class GoogleSheetsStore implements Store {
     );
   }
 
+  /** Mirror seam for the single settings row, which has its own layout. */
+  async pushSettingsRow(settings: Database['settings']): Promise<void> {
+    await this.pushSettings(settings);
+  }
+
   /* ------------------------------ writing ------------------------------ */
 
   snapshot(): Database {
@@ -461,7 +466,29 @@ export class GoogleSheetsStore implements Store {
   }
 
   /**
-   * Writes a full table. Existing rows are reused by id (so a hand edit in the
+   * Writes one whole tab straight from the given rows, leaving this store's own
+   * database alone.
+   *
+   * This is the seam a mirror uses: it hands over the authoritative rows and
+   * gets the existing stable-id upsert for free - a row whose id is already in
+   * the tab is updated where it stands, a new id is appended, and a row that is
+   * no longer in the set is trimmed off. Because rows are addressed by id, the
+   * same bill can be pushed any number of times and can never appear twice.
+   *
+   * `derived` supplies the calculated cells (see derivedCellsFor).
+   */
+  async pushRows(
+    sheet: string,
+    rows: Row[],
+    derived?: Map<string, Record<string, unknown>>,
+  ): Promise<void> {
+    const table = this.tableFor(sheet);
+    if (!table) throw new Error(`Unknown tab: ${sheet}`);
+    const { sheets, spreadsheetId } = await getClients(this.spreadsheetId);
+    await this.writeTable(sheets, spreadsheetId, table, rows, derived);
+  }
+
+  /** Writes a full table. Existing rows are reused by id (so a hand edit in the
    * sheet is not shifted around), new rows are appended, removed rows deleted
    * and any leftover empty rows trimmed away.
    */
@@ -470,6 +497,7 @@ export class GoogleSheetsStore implements Store {
     spreadsheetId: string,
     table: TableDef,
     rows: Row[],
+    derived?: Map<string, Record<string, unknown>>,
   ): Promise<void> {
     const index = this.rowIndex.get(table.sheet) ?? new Map<string, number>();
     const lastCol = colLetter(table.columns.length - 1);
@@ -502,7 +530,9 @@ export class GoogleSheetsStore implements Store {
       }
     }
 
-    const valueRows = rows.map((record) => recordToRow(table, record));
+    const valueRows = rows.map((record) =>
+      recordToRow(table, record, derived?.get(String(record[table.key] ?? ''))),
+    );
 
     // 1. Update existing rows (grouped into contiguous blocks).
     const updates: sheets_v4.Schema$ValueRange[] = [];

@@ -13,7 +13,7 @@ import {
 import { useDashboard } from '@/hooks/use-queries';
 import { PageHeader } from '@/components/app-shell';
 import { ContactActions } from '@/components/contact-actions';
-import { HiddenSectionNote, SectionEye, UnhideSheet } from '@/components/dashboard-hide';
+import { HiddenSectionsButton, SectionEye, UnhideSheet } from '@/components/dashboard-hide';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState, ErrorBlock, LoadingBlock } from '@/components/ui/feedback';
@@ -41,18 +41,19 @@ export default function Dashboard(): JSX.Element {
   if (error && !data) return <ErrorBlock message={error.message} onRetry={() => void refetch()} />;
   if (!data) return <ErrorBlock message="No data available." onRetry={() => void refetch()} />;
 
+  const hiddenCount = vis.hidden.size;
+
   return (
     <div className="space-y-4">
       <PageHeader
         title="JMR — BILLING"
         subtitle={`${dateOnly(new Date().toISOString())} · ${greeting()}`}
         center
+        action={hiddenCount > 0 ? <HiddenSectionsButton count={hiddenCount} vis={vis} /> : undefined}
       />
 
       {/* Today's collection - the one number the owner opens the app for. */}
-      {vis.hidden.has('collection') ? (
-        <HiddenSectionNote label="Today's Collection" vis={vis} />
-      ) : (
+      {!vis.hidden.has('collection') && (
         <Card className="border-success/40 bg-success/5">
           <CardContent className="pt-4">
             <div className="flex items-start justify-between gap-2">
@@ -95,9 +96,7 @@ export default function Dashboard(): JSX.Element {
 
       {/* Four status cards. "In Shop" and "Ready" are hidden together, because
           they are two halves of the same question: where is the device now. */}
-      {vis.hidden.has('bills') ? (
-        <HiddenSectionNote label="Bills Today" vis={vis} />
-      ) : (
+      {!vis.hidden.has('bills') && (
         <StatCard
           section="bills"
           label="Bills Today"
@@ -109,9 +108,7 @@ export default function Dashboard(): JSX.Element {
         />
       )}
 
-      {vis.hidden.has('bench') ? (
-        <HiddenSectionNote label="In Shop / Ready" vis={vis} />
-      ) : (
+      {!vis.hidden.has('bench') && (
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             section="bench"
@@ -135,9 +132,7 @@ export default function Dashboard(): JSX.Element {
         </div>
       )}
 
-      {vis.hidden.has('due') ? (
-        <HiddenSectionNote label="Money Due" vis={vis} />
-      ) : (
+      {!vis.hidden.has('due') && (
         <StatCard
           section="due"
           label="Money Due"

@@ -8,7 +8,7 @@ import {
 import { toIso } from '../core/datetime';
 import { ValidationError } from '../core/errors';
 import { nowIso } from '../core/id';
-import { getStore, isGoogleAvailable, useGoogleSheets, useLocalFile } from '../data/index';
+import { getMirror, getStore, isGoogleAvailable, useGoogleSheets, useLocalFile } from '../data/index';
 import { mutate, read } from '../data/mutate';
 import type { Database } from '../data/database';
 import { TABLES, recordToRow, rowToRecord } from '../data/sheets/sheetSchema';
@@ -64,6 +64,39 @@ export async function syncStatus(): Promise<SyncStatus> {
     };
   }
 
+  if (store.mode === 'postgres') {
+    const health = await store.health();
+    const sheets = getMirror();
+    const pending = sheets?.pendingCount() ?? 0;
+    const copyFailed = sheets ? sheets.lastError() : '';
+
+    let message: string;
+    if (!health.ok) {
+      message = `The online database cannot be reached right now: ${health.detail ?? 'please try again'}.`;
+    } else if (!sheets) {
+      message = 'Bills are saved in the online database. No Google Sheets copy is connected.';
+    } else if (pending > 0) {
+      message = `Bills are saved in the online database. ${pending} sheet${pending === 1 ? '' : 's'} ${pending === 1 ? 'is' : 'are'} still behind.`;
+    } else {
+      message = 'Bills are saved in the online database and copied to Google Sheets.';
+    }
+
+    return {
+      mode: 'postgres',
+      connected: health.ok,
+      // With a spreadsheet attached this is the copy's own link, so the owner
+      // can open and read it. Without one it is the database's address, which
+      // carries no password.
+      spreadsheetId: sheets?.spreadsheetId() ?? '',
+      spreadsheetUrl: sheets ? sheets.location() : store.location(),
+      driveConnected,
+      lastPushAt: sheets?.lastFlushAt() || db.meta.lastPushAt,
+      lastPullAt: db.meta.lastPullAt,
+      pendingCount: pending,
+      message,
+    };
+  }
+
   return {
     mode: 'sheets',
     connected: pending === 0,
@@ -114,26 +147,54 @@ function countRows(key: DatasetKey, db: ReturnType<typeof read>): number {
 /** Retries any Google writes that failed earlier. */
 export async function retryPending(): Promise<{ ok: boolean; message: string }> {
   const store = getStore();
-  if (store.mode !== 'sheets') {
+  const hasSomethingToRetry =
+    store.mode === 'sheets' || (store.mode === 'postgres' && getMirror() !== null);
+  if (!hasSomethingToRetry) {
     return { ok: true, message: 'Nothing is waiting to sync.' };
   }
   try {
     const result = await store.flushPending();
+    if (result.failed > 0) {
+      return { ok: false, message: 'Unable to sync right now. Please try again.' };
+    }
     return { ok: true, message: `${result.pushed} change${result.pushed === 1 ? '' : 's'} synced.` };
   } catch {
     return { ok: false, message: 'Unable to sync right now. Please try again.' };
   }
 }
 
+/**
+ * Pulling data in from the spreadsheet.
+ *
+ * Refused while the database is the store. The spreadsheet is a copy of the
+ * shop's records, and a bill's amount, payment or stock figure is not something
+ * that should be able to change because a cell in a browser was edited. The
+ * bills are changed in the app, where the change is checked and recorded.
+ */
 export async function syncPull(dataset: DatasetKey): Promise<SyncResult> {
+  if (getStore().mode === 'postgres') {
+    return {
+      created: 0,
+      updated: 0,
+      unchanged: 0,
+      conflicts: 0,
+      skipped: 0,
+      message: importRefusedMessage(),
+      details: [],
+    };
+  }
   if (dataset === 'settings') {
     return pullSettings();
   }
-  const result = await getStore().syncFromSource(SHEET_BY_DATASET[dataset]);
+  const store = getStore();
+  const result = await store.syncFromSource(SHEET_BY_DATASET[dataset]);
   await mutate((draft) => {
     draft.meta.lastPullAt = nowIso();
     return null;
   });
+  // With Postgres this is a re-read of the database, not a spreadsheet, so the
+  // sentence has to name wherever the rows actually came from.
+  const source = store.mode === 'postgres' ? 'the online database' : 'the sheet';
   return {
     created: result.created,
     updated: result.updated,
@@ -142,14 +203,44 @@ export async function syncPull(dataset: DatasetKey): Promise<SyncResult> {
     skipped: 0,
     message:
       result.created + result.updated === 0
-        ? `No new data in the ${DATASET_LABEL[dataset]} sheet.`
-        : `${DATASET_LABEL[dataset]}: ${result.created} added, ${result.updated} updated from the sheet.`,
+        ? `No new data in ${source}.`
+        : `${DATASET_LABEL[dataset]}: ${result.created} added, ${result.updated} updated from ${source}.`,
     details: result.details,
   };
 }
 
+function importRefusedMessage(): string {
+  return 'The spreadsheet is a copy of the online database. Changes are made in the app, not in Google Sheets.';
+}
+
 export async function syncPush(dataset: DatasetKey): Promise<SyncResult> {
   const store = getStore();
+  if (store.mode === 'postgres') {
+    // The data is already in the database. What "push" means here is re-sending
+    // that tab to the spreadsheet copy, so the owner can bring the sheet level
+    // up by hand after editing something outside the app.
+    if (!getMirror()) {
+      return {
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        conflicts: 0,
+        skipped: 0,
+        message: `${DATASET_LABEL[dataset]} is already saved in the online database. No spreadsheet copy is connected.`,
+        details: [],
+      };
+    }
+    const result = await store.syncToSource(SHEET_BY_DATASET[dataset]);
+    return {
+      created: 0,
+      updated: result.pushed,
+      unchanged: 0,
+      conflicts: 0,
+      skipped: 0,
+      message: `${DATASET_LABEL[dataset]}: ${result.pushed} row${result.pushed === 1 ? '' : 's'} copied to the spreadsheet.`,
+      details: result.details,
+    };
+  }
   if (store.mode !== 'sheets') {
     return {
       created: 0,
@@ -192,6 +283,12 @@ export async function syncPush(dataset: DatasetKey): Promise<SyncResult> {
 
 async function pullSettings(): Promise<SyncResult> {
   const store = getStore();
+  if (store.mode === 'postgres') {
+    return {
+      created: 0, updated: 0, unchanged: 1, conflicts: 0, skipped: 0,
+      message: 'Shop details are already stored in the online database.', details: [],
+    };
+  }
   if (store.mode !== 'sheets') {
     return {
       created: 0, updated: 0, unchanged: 1, conflicts: 0, skipped: 0,
@@ -263,6 +360,11 @@ function toCsvLocal(headers: string[], rows: unknown[][]): string {
  * Bulk import from a CSV the owner edited in Excel / Google Sheets.
  * Rows are matched on their stable id, so importing the same file twice is
  * harmless. `updatedAt` decides the winner when both sides changed.
+ *
+ * Only available while the shop runs on its own files. With the online database
+ * as the store this is refused: a bill, a payment or a stock figure that
+ * arrived from a spreadsheet is a figure nobody in the shop checked, and it
+ * would land in the day's takings. The owner edits the app instead.
  */
 export async function importRows(input: {
   dataset: Exclude<DatasetKey, 'settings'>;
@@ -271,6 +373,12 @@ export async function importRows(input: {
 }): Promise<SyncResult> {
   const dataset = input.dataset;
   const table = TABLES[dataset];
+  if (getStore().mode === 'postgres') {
+    return {
+      created: 0, updated: 0, unchanged: 0, conflicts: 0, skipped: 0,
+      message: importRefusedMessage(), details: [],
+    };
+  }
   if (!table) {
     return {
       created: 0, updated: 0, unchanged: 0, conflicts: 0, skipped: 0,
@@ -477,12 +585,15 @@ export async function setupGoogle(input: {
   forgetDriveAccess();
   forgetDriveFolders();
   const finalReport = await googleConnectionReport({ spreadsheetId, driveFolderId });
+  const asCopy = getStore().mode === 'postgres';
   return {
     status: await syncStatus(),
     report: finalReport,
     shared,
     message: finalReport.sheetsReady
-      ? `Connected to "${finalReport.spreadsheetTitle || 'your spreadsheet'}". Every repair is now saved online.`
+      ? asCopy
+        ? `Connected to "${finalReport.spreadsheetTitle || 'your spreadsheet'}". The bills stay in the online database and are copied into this spreadsheet.`
+        : `Connected to "${finalReport.spreadsheetTitle || 'your spreadsheet'}". Every repair is now saved online.`
       : finalReport.summary,
   };
 }

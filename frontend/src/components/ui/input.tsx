@@ -48,4 +48,28 @@ const Textarea = React.forwardRef<
 ));
 Textarea.displayName = 'Textarea';
 
+/**
+ * Opens the number pad the phone already has, for a field that takes a number.
+ *
+ * `type="tel"` is deliberately not used, even though it looks like the right
+ * thing for a phone number. It tells the browser "telephone", so iOS shows the
+ * full phone keypad - `*`, `#`, `+` and a letters toggle - and the browser then
+ * ignores `inputMode` altogether. The result at the counter is somebody typing
+ * a mobile number on an alphabet keyboard.
+ *
+ * `inputMode="numeric"` is what Android and current iOS read, and
+ * `pattern="[0-9]*"` is the long standing iOS trigger for a digits only pad on
+ * a plain text input. Together they give a keypad with just 0-9.
+ *
+ * This is only a hint to the operating system: the keypad is the one already on
+ * the device, so it keeps the owner's own language, swipe and dictation habits.
+ * No custom keypad is drawn, which is what a shop counter wants - the number has
+ * to be typeable one handed, quickly, without a custom widget getting in the way.
+ */
+export const numberPad = {
+  type: 'text',
+  inputMode: 'numeric',
+  pattern: '[0-9]*',
+} as const;
+
 export { Input, Textarea };

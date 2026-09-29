@@ -11,9 +11,6 @@ import { ConflictError, NotFoundError, ValidationError } from '../core/errors';
 import { formatOrderId, highestOrderSequence, newId, nowIso } from '../core/id';
 import { consumeDeliveryConsumables } from './stockOps';
 
-/** Meta key holding the single shop wide bill number counter. */
-export const GLOBAL_SEQUENCE_KEY = 'global';
-
 /**
  * Repair order rules. Pure functions over the database draft - no I/O, no
  * Google, no HTTP. This is where the correctness of the shop workflow lives.
@@ -24,18 +21,15 @@ export const GLOBAL_SEQUENCE_KEY = 'global';
  * it never restarts. Employees never type this.
  */
 export function nextOrderId(draft: Database): string {
-  // Old yearly counters ({"2026": 7}) and any hand typed / restored row are both
-  // taken into account, so the new number can never clash with an existing bill.
-  const stored = Object.values(draft.meta.orderSequence ?? {}).reduce(
-    (max, value) => Math.max(max, Number(value) || 0),
-    0,
-  );
+  // One number for the whole shop, taken as the highest of two things: the
+  // counter already saved, and the numbers on bills that actually exist. Taking
+  // the maximum of both is what makes a restored backup, a hand typed id, or a
+  // counter that was somehow missed still unable to produce a number that is
+  // already on a bill.
+  const stored = Math.max(0, Number(draft.meta.orderSequence) || 0);
   const used = highestOrderSequence(draft.orders.map((order) => order.id));
   const sequence = Math.max(stored, used) + 1;
-  draft.meta.orderSequence = {
-    ...(draft.meta.orderSequence ?? {}),
-    [GLOBAL_SEQUENCE_KEY]: sequence,
-  };
+  draft.meta.orderSequence = sequence;
   return formatOrderId(sequence);
 }
 

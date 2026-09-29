@@ -127,6 +127,37 @@ export const env = {
   jwtSecret: str('JWT_SECRET', 'insecure-dev-secret-change-me'),
   corsOrigins: list('CORS_ORIGINS'),
 
+  /**
+   * The online store. When a connection string is present this database - not
+   * Google Sheets - holds the bills, and the app refuses to start if it cannot
+   * be reached, so a bill is never quietly written somewhere else.
+   */
+  database: {
+    url: str('DATABASE_URL'),
+    /** Only used by the one-time setup script, never by the running app. */
+    adminUrl: str('POSTGRES_ADMIN_URL'),
+    /** Small shop, small pool. Each Postgres connection costs 1-3MB of RAM. */
+    poolMax: num('DATABASE_POOL_MAX', 10),
+    /**
+     * How often a screen left open on the counter re-reads the shop, in
+     * milliseconds. Two seconds is short enough that a bill taken on the other
+     * phone appears without anyone tapping refresh, and long enough that an
+     * ordinary reading of the app costs almost nothing.
+     *
+     * 0 turns it off, which is the right setting for a single till.
+     */
+    refreshMs: num('DB_REFRESH_MS', 2000),
+  },
+
+  /**
+   * Whether the shop's records are also copied into a Google spreadsheet.
+   *
+   * The spreadsheet only ever receives; it is a report copy for reading in
+   * Excel, never a place to change a bill. Turn this off to run the database on
+   * its own, which also saves the Google API calls the copy would make.
+   */
+  sheetsMirror: bool('SHEETS_MIRROR', true),
+
   google: {
     sheetsId: str('GOOGLE_SHEETS_ID'),
     driveRootFolderId: str('GOOGLE_DRIVE_ROOT_FOLDER_ID'),
@@ -151,6 +182,15 @@ export const env = {
   owner: {
     name: str('OWNER_NAME', 'Ashok Bhai'),
     username: str('OWNER_USERNAME', 'ashok'),
+    /**
+     * The development default, used when there is no database.
+     *
+     * Read this only for the local file store. A real shop's password is chosen
+     * by the person, not shipped in the code, so the setup script looks at
+     * `passwordGiven` and generates one when it is blank.
+     */
     password: str('OWNER_PASSWORD', 'shop1234'),
+    /** True only when OWNER_PASSWORD was actually filled in. */
+    passwordGiven: str('OWNER_PASSWORD') !== '',
   },
 } as const;

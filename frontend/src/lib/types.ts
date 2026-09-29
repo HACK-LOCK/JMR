@@ -144,4 +144,10 @@ export interface DatasetLabels {
   rows: number;
 }
 
+/** Brands and models this shop has repaired, offered on the new bill screen. */
+export interface DeviceHints {
+  brands: string[];
+  models: { label: string; brand: string }[];
+}
+
 export type { OrderStatus, ShopSettings, Part, RepairOrder, Payment, StockMovement };

@@ -38,6 +38,16 @@ import type { orderCreateSchema, orderUpdateSchema } from '../validation/schemas
 type OrderCreateInput = z.infer<typeof orderCreateSchema>;
 type OrderUpdateInput = z.infer<typeof orderUpdateSchema>;
 
+/** How many of each to offer. Enough to fill a phone screen, no more. */
+const HINT_LIMIT = 12;
+
+/** Brands and models the shop has used, most used first. */
+export interface DeviceHints {
+  brands: string[];
+  /** Each model keeps its brand, so the caller can narrow without asking again. */
+  models: { label: string; brand: string }[];
+}
+
 export type OrderScope =
   | 'all'
   | 'today'
@@ -224,8 +234,83 @@ export function getOrderDetail(orderId: string): OrderWithParts {
 
 export function nextOrderIdPreview(): string {
   const db = read();
-  const draft = { ...db, meta: { ...db.meta, orderSequence: { ...db.meta.orderSequence } } };
+  // The counter is a plain number, so a copy of meta is enough to run the real
+  // rule against without touching the live snapshot.
+  const draft = { ...db, meta: { ...db.meta } };
   return nextOrderId(draft);
+}
+
+/* ------------------------------------------------------------------ */
+/* Suggestions                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Brands and models this shop has actually repaired, most used first.
+ *
+ * The new bill screen offers these so a bill says "Galaxy M30" the way the
+ * shop wrote it before, rather than however it was spelled this time. The words
+ * come from the shop's own bills and its own stock, which is the only list that
+ * is right for this counter - a generic list of every brand made would offer
+ * names nobody here has ever repaired.
+ *
+ * Ordered by how often each one turns up, so the thing this shop fixes most
+ * often is the first thing offered. Passing a brand narrows the models to that
+ * brand, which is what stops "M30" from matching a laptop.
+ */
+export function deviceHints(input: { q?: string } = {}): DeviceHints {
+  const db = read();
+  const q = (input.q ?? '').trim().toLowerCase();
+
+  const brandTally = new Map<string, { label: string; count: number }>();
+  const modelTally = new Map<string, { label: string; count: number; brand: string }>();
+
+  const addBrand = (value: string, weight: number): void => {
+    const label = value.trim();
+    if (!label) return;
+    const key = label.toLowerCase();
+    const existing = brandTally.get(key);
+    // One bill, one brand - so a single order is counted once no matter how
+    // many of its lines repeat it.
+    brandTally.set(key, { label: existing?.label ?? label, count: (existing?.count ?? 0) + weight });
+  };
+
+  const addModel = (value: string, modelBrand: string, weight: number): void => {
+    const label = value.trim();
+    if (!label) return;
+    const key = `${modelBrand.trim().toLowerCase()}|${label.toLowerCase()}`;
+    const existing = modelTally.get(key);
+    modelTally.set(key, {
+      label: existing?.label ?? label,
+      count: (existing?.count ?? 0) + weight,
+      brand: existing?.brand ?? modelBrand.trim(),
+    });
+  };
+
+  for (const order of db.orders) {
+    addBrand(order.brand, 1);
+    addModel(order.model, order.brand, 1);
+  }
+  // Stock knows about models that have not come through the repair counter yet,
+  // and a part is a real thing the shop holds, so its wording counts too.
+  for (const part of db.parts) {
+    addBrand(part.brand, 1);
+    addModel(part.model, part.brand, 1);
+  }
+
+  const ranked = (tally: Map<string, { label: string; count: number }>): string[] =>
+    [...tally.values()]
+      .filter((item) => (q ? item.label.toLowerCase().includes(q) : true))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, HINT_LIMIT)
+      .map((item) => item.label);
+
+  const models = [...modelTally.values()]
+    .filter((item) => (q ? item.label.toLowerCase().includes(q) : true))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, HINT_LIMIT)
+    .map((item) => ({ label: item.label, brand: item.brand }));
+
+  return { brands: ranked(brandTally), models };
 }
 
 /* ------------------------------------------------------------------ */

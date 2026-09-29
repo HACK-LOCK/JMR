@@ -28,8 +28,13 @@ export interface Database {
 }
 
 export interface Meta {
-  /** Per-year order sequence, e.g. { "2026": 482 } */
-  orderSequence: Record<string, number>;
+  /**
+   * The highest bill number handed out so far, as one plain number.
+   *
+   * A single global counter: 0 before the first bill, so the first bill is
+   * JMR-0001, and it never restarts on a new day or a new year.
+   */
+  orderSequence: number;
   lastPushAt: string;
   lastPullAt: string;
   createdAt: string;
@@ -63,7 +68,7 @@ export function emptyDatabase(): Database {
     stockMovements: [],
     suppliers: [],
     statusHistory: [],
-    meta: { orderSequence: {}, lastPushAt: '', lastPullAt: '', createdAt: now },
+    meta: { orderSequence: 0, lastPushAt: '', lastPullAt: '', createdAt: now },
   };
 }
 

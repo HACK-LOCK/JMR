@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { InlineNotice, LoadingBlock } from '@/components/ui/feedback';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
@@ -153,8 +153,7 @@ export default function Settings(): JSX.Element {
             <Field label="Number" htmlFor="contact1-number">
               <Input
                 id="contact1-number"
-                type="tel"
-                inputMode="numeric"
+                {...numberPad}
                 value={form.contact1Number}
                 onChange={(event) => set('contact1Number', event.target.value)}
                 disabled={!isOwner}
@@ -174,8 +173,7 @@ export default function Settings(): JSX.Element {
             <Field label="Number" htmlFor="contact2-number" optional>
               <Input
                 id="contact2-number"
-                type="tel"
-                inputMode="numeric"
+                {...numberPad}
                 value={form.contact2Number}
                 onChange={(event) => set('contact2Number', event.target.value)}
                 disabled={!isOwner}

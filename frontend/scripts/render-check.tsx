@@ -1061,22 +1061,24 @@ function main(): void {
       console.log(`        ${(error as Error).message.split('\n')[0]}`);
     }
     if (html) {
-      // The figures themselves must be gone. Their names stay as a short note,
-      // so the space is not a hole and the owner knows what is put away.
+      // The figures themselves must be gone, and the space they leave behind must
+      // be left alone: no note standing in for them, no sentence explaining that
+      // they are away. Nothing is drawn where a figure used to be.
       const figures = ['₹4,200', '₹8,000'].filter((value) => html.includes(value));
       const notes = (html.match(/is hidden\. Tap to bring it back\./g) ?? []).length;
-      // Each note has to be a real control, or the text asks for an eye that
-      // is not there and the section can only be brought back from the menu.
+      // One eye brings every figure back after one PIN, so there is one control
+      // rather than one per hidden section. It has to be a real button, or the
+      // way back disappears and the figures can only be restored by hand.
       const unhideButtons = (html.match(/aria-label="Show [^"]+"/g) ?? []).length;
       const kept = ['New Bill', 'Search Order'].filter((label) => !html.includes(label));
-      if (figures.length === 0 && notes === 4 && unhideButtons === 4 && kept.length === 0) {
-        console.log('  ok    all four figures hidden, each note is a working button, actions kept');
+      if (figures.length === 0 && notes === 0 && unhideButtons === 1 && kept.length === 0) {
+        console.log('  ok    all four figures hidden, one quiet eye brings them back, actions kept');
       } else {
         failures += 1;
         console.log('  FAIL  hidden dashboard must drop the figures and keep the two quick actions');
         for (const value of figures) console.log(`        still showing the figure: ${value}`);
-        if (notes !== 4) console.log(`        expected 4 hidden-section notes, found ${notes}`);
-        if (unhideButtons !== 4) console.log(`        expected 4 "Show ..." buttons, found ${unhideButtons}`);
+        if (notes !== 0) console.log(`        expected no hidden-section notes, found ${notes}`);
+        if (unhideButtons !== 1) console.log(`        expected 1 "Show ..." button, found ${unhideButtons}`);
         for (const label of kept) console.log(`        missing: ${label}`);
       }
     }

@@ -22,7 +22,7 @@ import { PartPicker } from '@/components/part-picker';
 import { StockGate } from '@/components/stock-gate';
 import { Button } from '@/components/ui/button';
 import { EmptyState, ErrorBlock, InlineNotice, LoadingBlock } from '@/components/ui/feedback';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Sheet } from '@/components/ui/sheet';
@@ -1007,8 +1007,7 @@ function SupplierSheet({
         <Field label="Mobile" htmlFor="supplier-mobile" optional error={touched ? mobileError || null : null}>
           <Input
             id="supplier-mobile"
-            type="tel"
-            inputMode="numeric"
+            {...numberPad}
             value={form.mobile}
             onChange={(event) =>
               setForm((c) => ({ ...c, mobile: mobileOnly(event.target.value).slice(0, 10) }))

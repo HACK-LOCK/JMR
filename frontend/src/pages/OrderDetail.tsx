@@ -29,9 +29,11 @@ import { PageHeader } from '@/components/app-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
+  import { Select } from '@/components/ui/select';
+  import { ProblemField } from '@/components/problem-field';
+  import { BrandField, ModelField } from '@/components/device-fields';
 import { DetailRow } from '@/components/ui/table';
 import { ErrorBlock, InlineNotice, LoadingBlock } from '@/components/ui/feedback';
 import { Sheet } from '@/components/ui/sheet';
@@ -844,8 +846,7 @@ function EditOrderSheet({
           <Field label="Mobile" htmlFor="edit-mobile">
             <Input
               id="edit-mobile"
-              type="tel"
-              inputMode="numeric"
+              {...numberPad}
               value={form.mobile}
               onChange={(event) => set('mobile', event.target.value)}
             />
@@ -871,18 +872,28 @@ function EditOrderSheet({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Brand" htmlFor="edit-brand">
-            <Input id="edit-brand" value={form.brand} onChange={(event) => set('brand', event.target.value)} />
+            <BrandField
+              id="edit-brand"
+              value={form.brand}
+              onChange={(next) => set('brand', next)}
+            />
           </Field>
           <Field label="Model" htmlFor="edit-model">
-            <Input id="edit-model" value={form.model} onChange={(event) => set('model', event.target.value)} />
+            <ModelField
+              id="edit-model"
+              value={form.model}
+              onChange={(next) => set('model', next)}
+              brand={form.brand}
+            />
           </Field>
         </div>
 
         <Field label="Problem" htmlFor="edit-complaint">
-          <Textarea
+          <ProblemField
             id="edit-complaint"
             value={form.complaint}
-            onChange={(event) => set('complaint', event.target.value)}
+            onChange={(next) => set('complaint', next)}
+            placeholder="Display change, mic problem..."
           />
         </Field>
 

@@ -1,11 +1,13 @@
 # Jai Mataji Mobile Repairing — Shop Manager
 
 A simple, mobile-first Progressive Web App for a phone & electronics repair shop.
-Runs entirely on your own computer. Works offline. No monthly SaaS bill.
+Runs entirely on your own computer, or in the cloud. Works offline. No monthly SaaS bill.
 
-Two things, kept deliberately separate:
+Three things, kept deliberately separate:
 
-- **Google Sheets** — a readable, shareable backup of your records.
+- **The shop's records** — a file on your own computer, or a Supabase Postgres
+  database in the cloud if you want to use more than one device at the counter.
+- **Google Sheets** — a readable, shareable copy of those records.
 - **Google Drive** — one PDF bill per repair, filed by year.
 
 If Google is not connected the shop still works fully; bills are just not uploaded.
@@ -115,6 +117,32 @@ Note that `http://` on a local network works for installing, but service workers
 and offline caching require HTTPS. For day-to-day use on a shop counter, see
 [Putting it online](#putting-it-online).
 
+## Using it on two devices at the counter
+
+Two phones on the same Wi-Fi pointed at one computer are not a shared shop: each
+connects and reads its own copy, so one phone will happily quote a balance the
+other has already changed.
+
+For that, the records need to be in the online database:
+
+```powershell
+npm run db:setup     # once: tables, a limited role, first owner login
+npm run db:check     # confirm the app can reach it
+```
+
+Put the `DATABASE_URL` that `db:setup` prints into `.env`, restart, and the
+banner should say **Online database (Supabase Postgres)**. Both devices now read
+and write the same rows, a bill taken on one appears on the other within a couple
+of seconds, and two devices saving at the same instant cannot be given the same
+bill number.
+
+The Supabase free plan is enough. Full walkthrough, including the two similar
+URLs that are not interchangeable:
+[docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)
+
+Nothing is carried over from the local file. The database starts empty and is
+filled only by real bills, so no test bill can turn up in a day's takings.
+
 ---
 
 ## Configuration
@@ -135,8 +163,17 @@ Create a `.env` file in the project root to change any of it.
 | `STOCK_PIN_TTL_MINUTES` | `120` | How long the Stock area stays open |
 | `STOCK_PIN_MAX_ATTEMPTS` | `5` | Wrong tries before a short cool-down |
 | `CORS_ORIGINS` | — | Extra origins allowed to call the API |
+| `DATABASE_URL` | — | **Set this to use the online database instead of the local file** |
+| `POSTGRES_ADMIN_URL` | — | Setup only. See [Supabase setup](docs/SUPABASE_SETUP.md) |
+| `DATABASE_POOL_MAX` | `10` | Database connections the server may hold |
+| `DB_REFRESH_MS` | `2000` | How often a screen left open re-reads the shop. `0` turns it off |
+| `SHEETS_MIRROR` | `true` | Copy bills into Google Sheets when a database is in use |
+| `GOOGLE_SHEETS_ID` | — | Spreadsheet to use, if you would rather set it than connect in the app |
+| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | — | Drive folder for bill PDFs. Created if missing |
 
-The owner account is created on first run only.
+The owner account is created on first run only. In local mode the default
+password is `shop1234`; with a database, `npm run db:setup` generates one and
+prints it once unless you set `OWNER_PASSWORD` yourself.
 
 **Change the password before real use:** open **JMR — STOCK → Settings →
 Accounts → Change my password**. It asks for the current password, so
@@ -144,7 +181,7 @@ nobody can take over an account that was left signed in.
 
 Other accounts are added in the same screen.
 
-`OWNER_USERNAME` / `OWNER_PASSWORD` in `.env` only apply when the database is
+`OWNER_USERNAME` / `OWNER_PASSWORD` in `.env` only apply when the accounts are
 created for the first time. Changing them later has no effect — use the app.
 
 **The Stock PIN** is checked by the server only — it is never stored in the
@@ -200,9 +237,9 @@ GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account", ...}
 ### How the two are used
 
 - **Sheets** — one tab per dataset (orders, customers, parts, suppliers,
-  payments, stock movements). The local database stays the source of truth; the
-  sheet is pushed to after each change. If a push fails it is queued and
-  retried, and the app carries on working.
+  payments, stock movements). Whichever store the shop is using stays the source
+  of truth; the sheet is pushed to after each change. If a push fails it is
+  queued and retried, and the app carries on working.
 - **Drive** — bills are written to `<Your Shop Name>/Bills/<year>/<Month>/<ORDER-ID>.pdf`.
   The first save creates the file; every later edit updates that same file.
 
@@ -223,11 +260,19 @@ work, cheapest first:
 Point whichever you choose at port 4000. Keep the tunnel URL in `CORS_ORIGINS`
 if you also serve the frontend separately.
 
+To host the server itself, any Node 20 host works. Build `npm ci && npm run
+build`, start `npm start`, health check `/api/health`. No persistent disk is
+needed when the online database is in use, because staff logins live there too.
+See [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) for the environment
+variables.
+
 ---
 
 ## Data & backups
 
-- The local database is a single JSON file: `backend/.data/shop-data.json`
+**Local file mode**
+
+- The database is a single JSON file: `backend/.data/shop-data.json`
 - Writes are atomic (write to a temp file, then rename) so a power cut cannot
   corrupt it
 - **Back it up by copying that file.** Sheet Sync is a second copy, not a
@@ -238,6 +283,19 @@ To wipe test data and start clean:
 ```bash
 rm -rf backend/.data
 ```
+
+**Online database mode**
+
+- Supabase keeps its own daily backups; check the retention on the plan you are on
+- **Back up from the app**, not from a spreadsheet: the **Settings → Export**
+  screen writes a file you can keep
+- A spreadsheet copy is convenient to read but is not the backup — if Google is
+  down for a week, the rows from that week are only in the database
+
+> The app never falls back to the local file when the database is unreachable. A
+> shop that quietly keeps the day in a file on one PC while everyone else is
+> looking at the database is worse than a server that is plainly down, so the
+> server stops instead.
 
 ---
 
@@ -278,7 +336,10 @@ All three must pass. The render check prints
 shared/domain.ts       Types + money/status rules shared by both sides
 backend/
   src/domain/          Pure business rules (no I/O) - orderOps, stockOps
-  src/data/            Storage: local JSON + Google Sheets adapter
+  src/data/            Storage: local JSON, Postgres, Google Sheets
+    local/             The JSON file store
+    postgres/          Postgres store, schema, row mapping
+    sheets/            Sheets client, tab layout, the read-only mirror
   src/services/        Orchestration per feature
   src/http/routes/     Express routes
   src/pdf/             A5 bill PDF
@@ -289,6 +350,9 @@ frontend/
   src/components/      Shared UI + app shell
   src/hooks/           API queries and mutations
   src/lib/             API client, auth, formatting
+docs/
+  SUPABASE_SETUP.md    Putting the shop's records online
+  GOOGLE_SETUP.md     Sheets, Drive and the service account
 ```
 
 The business rules live in `backend/src/domain/` as plain functions over a
@@ -301,10 +365,20 @@ and impossible to bypass from a route.
 
 **Port already in use** — set a different `PORT` in `.env`.
 
-**Login rejected** — the owner account is only seeded on first run. If
-`backend/.data` was created before you set `OWNER_PASSWORD`, either use
+**Login rejected** — in local mode the owner account is only seeded on first
+run. If `backend/.data` was created before you set `OWNER_PASSWORD`, either use
 **Settings → Change my password** (with the seeded password) or delete that
-folder to start over.
+folder to start over. With a database, run `npm run db:check`: it reports how
+many staff accounts exist, and `npm run db:setup` creates the first owner.
+
+**Server will not start, "could not reach the database"** — expected when the
+database is unreachable. It is deliberate, and see
+[Data & backups](#data--backups) for why there is no fallback. Check
+`DATABASE_URL` and confirm the Supabase project is not paused.
+
+**Two devices disagree** — check that the banner says **Online database**, not
+**local file**. Two devices on the same Wi-Fi pointed at one computer are
+reading separate copies; that is what the online database is for.
 
 **"Google Drive is not connected"** — expected when Google is not set up. The
 bill still generates; it is just not uploaded. Run `npm run google:check` for a

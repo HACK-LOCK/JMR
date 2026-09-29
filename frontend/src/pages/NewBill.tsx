@@ -11,9 +11,11 @@ import {
 import { PageHeader } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { ProblemField } from '@/components/problem-field';
+import { BrandField, ModelField } from '@/components/device-fields';
 import { InlineNotice } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -191,15 +193,29 @@ export default function NewBill(): JSX.Element {
             </CardHeader>
             <CardContent className="space-y-3">
               <Field
+                label="Customer Name"
+                htmlFor="customerName"
+                error={touched ? errors.customerName || null : null}
+              >
+                <Input
+                  id="customerName"
+                  value={form.customerName}
+                  onChange={(event) => set('customerName', event.target.value)}
+                  placeholder="Full name"
+                  invalid={touched && Boolean(errors.customerName)}
+                  className="h-14 text-lg"
+                />
+              </Field>
+
+              <Field
                 label="Mobile Number"
                 htmlFor="mobile"
                 error={touched ? errors.mobile || null : null}
-                hint="Start here - a returning customer's name fills in by itself."
+                hint="A returning customer's saved details fill in once the number matches."
               >
                 <Input
                   id="mobile"
-                  type="tel"
-                  inputMode="numeric"
+                  {...numberPad}
                   autoComplete="tel"
                   value={form.mobile}
                   onChange={(event) => set('mobile', mobileOnly(event.target.value).slice(0, 10))}
@@ -227,21 +243,6 @@ export default function NewBill(): JSX.Element {
                   <ChevronRight className="h-5 w-5 shrink-0 text-success" />
                 </button>
               ) : null}
-
-              <Field
-                label="Customer Name"
-                htmlFor="customerName"
-                error={touched ? errors.customerName || null : null}
-              >
-                <Input
-                  id="customerName"
-                  value={form.customerName}
-                  onChange={(event) => set('customerName', event.target.value)}
-                  placeholder="Full name"
-                  invalid={touched && Boolean(errors.customerName)}
-                  className="h-14 text-lg"
-                />
-              </Field>
             </CardContent>
           </Card>
 
@@ -266,24 +267,23 @@ export default function NewBill(): JSX.Element {
                   htmlFor="brand"
                   error={touched ? errors.brand || null : null}
                 >
-                  <Input
+                  <BrandField
                     id="brand"
                     value={form.brand}
-                    onChange={(event) => set('brand', event.target.value)}
+                    onChange={(next) => set('brand', next)}
                     placeholder="Samsung"
                     invalid={touched && Boolean(errors.brand)}
-                    className="h-12"
                   />
                 </Field>
               </div>
 
               <Field label="Model" htmlFor="model" optional>
-                <Input
+                <ModelField
                   id="model"
                   value={form.model}
-                  onChange={(event) => set('model', event.target.value)}
+                  onChange={(next) => set('model', next)}
+                  brand={form.brand}
                   placeholder="Galaxy M30"
-                  className="h-12"
                 />
               </Field>
 
@@ -291,15 +291,14 @@ export default function NewBill(): JSX.Element {
                 label="Problem"
                 htmlFor="complaint"
                 error={touched ? errors.complaint || null : null}
-                hint="Write exactly what the customer said."
+                hint="Tap the usual fault, or type exactly what the customer said."
               >
-                <Textarea
+                <ProblemField
                   id="complaint"
                   value={form.complaint}
-                  onChange={(event) => set('complaint', event.target.value)}
-                  placeholder="Screen broken, touch not working"
+                  onChange={(next) => set('complaint', next)}
+                  placeholder="Display change, mic problem..."
                   invalid={touched && Boolean(errors.complaint)}
-                  className="min-h-[80px]"
                 />
               </Field>
 

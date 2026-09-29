@@ -32,6 +32,11 @@ import type { GoogleCheckItem } from '@shared/domain';
 /**
  * Sheet Sync: shows exactly where the data lives right now, and gives the
  * owner honest controls to push, pull and retry. Nothing happens silently.
+ *
+ * With the online database as the store, the spreadsheet is a copy of it and
+ * only ever receives. The Pull and Import controls are therefore not shown at
+ * all in that mode: a bill amount, a payment or a stock figure should not be
+ * changeable by editing a cell in a browser.
  */
 export default function SheetSync(): JSX.Element {
   const { user } = useAuth();
@@ -48,6 +53,14 @@ export default function SheetSync(): JSX.Element {
   if (isLoading && !status) return <LoadingBlock label="Checking sync status..." />;
   if (error && !status) return <ErrorBlock message={error.message} onRetry={() => void refetch()} />;
   if (!status) return <ErrorBlock message="Sync status unavailable." />;
+
+  // The database is the store, and the spreadsheet is only a copy of it.
+  const inDatabase = status.mode === 'postgres';
+  const hasCopy = status.spreadsheetId !== '';
+  const storedInSheets = status.mode === 'sheets' && status.connected;
+  const storageHealthy = inDatabase ? status.connected : storedInSheets;
+  const canRetry = status.pendingCount > 0 && (inDatabase ? hasCopy : status.mode === 'sheets');
+  const canPush = isOwner && (inDatabase ? hasCopy : storedInSheets);
 
   const run = async (path: string, body?: unknown, label = 'Done'): Promise<void> => {
     try {
@@ -78,7 +91,7 @@ export default function SheetSync(): JSX.Element {
       {/* Where data lives right now */}
       <Card
         className={cn(
-          status.mode === 'sheets' && status.connected ? 'border-success' : 'border-warning/50',
+          storageHealthy ? 'border-success' : 'border-warning/50',
         )}
       >
         <CardContent className="space-y-3 pt-4">
@@ -86,12 +99,12 @@ export default function SheetSync(): JSX.Element {
             <div
               className={cn(
                 'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl',
-                status.mode === 'sheets' && status.connected
+                storageHealthy
                   ? 'bg-success/10 text-success'
                   : 'bg-warning/15 text-warning-foreground',
               )}
             >
-              {status.mode === 'sheets' && status.connected ? (
+              {storageHealthy ? (
                 <Cloud className="h-6 w-6" />
               ) : (
                 <CloudOff className="h-6 w-6" />
@@ -99,9 +112,11 @@ export default function SheetSync(): JSX.Element {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-lg font-black leading-tight">
-                {status.mode === 'sheets' && status.connected
-                  ? 'Google Sheets connected'
-                  : 'Saving on this device'}
+                {inDatabase
+                  ? 'Bills are in the online database'
+                  : storedInSheets
+                    ? 'Google Sheets connected'
+                    : 'Saving on this device'}
               </p>
               <p className="mt-0.5 text-sm text-muted-foreground">{status.message}</p>
             </div>
@@ -111,9 +126,21 @@ export default function SheetSync(): JSX.Element {
             <div className="flex justify-between gap-3">
               <span className="text-muted-foreground">Storage</span>
               <span className="font-semibold">
-                {status.mode === 'sheets' ? 'Google Sheets' : 'Local file (safe fallback)'}
+                {inDatabase
+                  ? 'Online database (Supabase Postgres)'
+                  : storedInSheets
+                    ? 'Google Sheets'
+                    : 'Local file (safe fallback)'}
               </span>
             </div>
+            {inDatabase ? (
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">Google Sheets</span>
+                <span className={cn('font-semibold', !hasCopy && 'text-muted-foreground')}>
+                  {hasCopy ? 'A copy for reading only' : 'No copy connected'}
+                </span>
+              </div>
+            ) : null}
             <div className="flex justify-between gap-3">
               <span className="text-muted-foreground">Bills in Drive</span>
               <span className={cn('font-semibold', !status.driveConnected && 'text-warning-foreground')}>
@@ -132,7 +159,7 @@ export default function SheetSync(): JSX.Element {
                 <span className="font-semibold">{dateTime(status.lastPushAt)}</span>
               </div>
             ) : null}
-            {status.lastPullAt ? (
+            {!inDatabase && status.lastPullAt ? (
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Last read from Sheets</span>
                 <span className="font-semibold">{dateTime(status.lastPullAt)}</span>
@@ -147,25 +174,28 @@ export default function SheetSync(): JSX.Element {
               rel="noreferrer"
               className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border-2 border-border text-sm font-bold"
             >
-              <Link2 className="h-4 w-4" /> Open the spreadsheet
+              <Link2 className="h-4 w-4" />
+              {inDatabase ? 'Open the spreadsheet copy' : 'Open the spreadsheet'}
             </a>
           ) : null}
 
           {status.pendingCount > 0 ? (
             <InlineNotice tone="warning">
-              {plural(status.pendingCount, 'change')} saved on this device but not yet in Google
-              Sheets. Nothing is lost - it will be sent automatically, or you can retry now.
+              {inDatabase
+                ? `${plural(status.pendingCount, 'sheet')} still behind. Every bill is already saved in the online database - only the copy is behind, and it will be sent automatically.`
+                : `${plural(status.pendingCount, 'change')} saved on this device but not yet in Google Sheets. Nothing is lost - it will be sent automatically, or you can retry now.`}
             </InlineNotice>
           ) : null}
 
           {isOwner ? (
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" onClick={() => setConnectOpen(true)}>
-                <FileSpreadsheet className="h-4 w-4" /> Connect Sheets
+                <FileSpreadsheet className="h-4 w-4" />
+                {inDatabase ? (hasCopy ? 'Change the copy' : 'Connect a copy') : 'Connect Sheets'}
               </Button>
               <Button
                 variant="warning"
-                disabled={status.pendingCount === 0 || status.mode !== 'sheets'}
+                disabled={!canRetry}
                 loading={action.isPending}
                 onClick={() => void run('/sync/retry', undefined, 'Pending changes sent')}
               >
@@ -175,7 +205,11 @@ export default function SheetSync(): JSX.Element {
           ) : (
             <InlineNotice tone="info">
               Google is connected by the person who set up the app
-              {status.mode === 'sheets' ? '.' : '. Ask them to connect Sheets from this screen.'}
+              {inDatabase
+                ? '.'
+                : storedInSheets
+                  ? '.'
+                  : '. Ask them to connect Sheets from this screen.'}
             </InlineNotice>
           )}
         </CardContent>
@@ -188,8 +222,9 @@ export default function SheetSync(): JSX.Element {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Push sends this app's newer data to the sheet. Pull reads the sheet and keeps the newer
-            row on each line - it never blindly overwrites.
+            {inDatabase
+              ? 'Push copies that tab into the spreadsheet so you can read it in Excel. The spreadsheet never changes the bills - a bill is edited in the app, where the change is checked and recorded.'
+              : "Push sends this app's newer data to the sheet. Pull reads the sheet and keeps the newer row on each line - it never blindly overwrites."}
           </p>
 
           <Field label="Data Set" htmlFor="sync-dataset">
@@ -204,24 +239,40 @@ export default function SheetSync(): JSX.Element {
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="success"
-              disabled={!isOwner || status.mode !== 'sheets' || !status.connected}
-              loading={action.isPending}
-              onClick={() => void run('/sync/push', { dataset }, 'Sent to Google Sheets')}
-            >
-              <Upload className="h-4 w-4" /> Push
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!isOwner || status.mode !== 'sheets' || !status.connected}
-              loading={action.isPending}
-              onClick={() => void run('/sync/pull', { dataset }, 'Read from Google Sheets')}
-            >
-              <Download className="h-4 w-4" /> Pull
-            </Button>
-          </div>
+          {inDatabase ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="success"
+                disabled={!canPush}
+                loading={action.isPending}
+                onClick={() => void run('/sync/push', { dataset }, 'Copied to Google Sheets')}
+              >
+                <Upload className="h-4 w-4" /> Copy to Sheets
+              </Button>
+              <Button variant="outline" disabled loading={action.isPending}>
+                <Download className="h-4 w-4" /> Pull disabled
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="success"
+                disabled={!canPush}
+                loading={action.isPending}
+                onClick={() => void run('/sync/push', { dataset }, 'Sent to Google Sheets')}
+              >
+                <Upload className="h-4 w-4" /> Push
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!canPush}
+                loading={action.isPending}
+                onClick={() => void run('/sync/pull', { dataset }, 'Read from Google Sheets')}
+              >
+                <Download className="h-4 w-4" /> Pull
+              </Button>
+            </div>
+          )}
 
           <Button
             variant="ghost"
@@ -262,9 +313,12 @@ export default function SheetSync(): JSX.Element {
         open={connectOpen}
         onOpenChange={setConnectOpen}
         currentSpreadsheetId={status.spreadsheetId}
-        connected={status.mode === 'sheets' && status.connected}
+        connected={inDatabase ? hasCopy : storedInSheets}
         onDisconnect={async () => {
-          if (window.confirm('Disconnect Google Sheets? Data will be saved on this device only.')) {
+          const question = inDatabase
+            ? 'Stop copying bills to Google Sheets? The bills stay in the online database, and the spreadsheet copy will stop being updated. Bill PDFs in Drive are not affected.'
+            : 'Disconnect Google Sheets? Data will be saved on this device only.';
+          if (window.confirm(question)) {
             await run('/sync/disconnect', undefined, 'Disconnected');
           }
         }}

@@ -114,12 +114,28 @@ async function main() {
       NODE_ENV: 'production',
       PORT: String(port),
       DATA_DIR: dataDir,
+      // The single most important line in this file.
+      //
+      // The server reads .env from the repo root on startup, and dotenv does not
+      // overwrite a variable that is already set. Blanking the database here is
+      // therefore what stops `npm test` from connecting to the shop's real
+      // Supabase project and writing test bills into it. Same for the admin
+      // connection, which must never travel with a test run at all.
+      DATABASE_URL: '',
+      POSTGRES_ADMIN_URL: '',
       // Sheets and Drive stay out of it: no test should talk to the real sheet.
       GOOGLE_SHEETS_ID: '',
       GOOGLE_DRIVE_ROOT_FOLDER_ID: '',
+      GOOGLE_SERVICE_ACCOUNT_JSON: '',
+      GOOGLE_SERVICE_ACCOUNT_FILE: '',
+      // Belt and braces: even if a key were found, no copy would be attempted.
+      SHEETS_MIRROR: 'false',
       // A PIN of the test's own, so the checks never depend on - or print -
       // whatever the shop has set in .env.
       STOCK_PIN: TEST_PIN,
+      // A token key of the test's own, so no test token is signed with the
+      // secret the shop runs on.
+      JWT_SECRET: `test-only-${crypto.randomBytes(16).toString('hex')}`,
     },
   });
 

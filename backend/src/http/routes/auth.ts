@@ -61,7 +61,7 @@ async function verifyShopPin(userId: string, pin: string): Promise<void> {
   if (sharedPin) {
     ok = safeEqual(pin, sharedPin);
   } else {
-    const user = userStore.findById(userId);
+    const user = await userStore.findById(userId);
     ok = Boolean(user && (await userStore.verifyPassword(user, pin)));
   }
 
@@ -76,7 +76,7 @@ authRouter.post(
   '/login',
   asyncRoute(async (req, res) => {
     const { username, password } = loginSchema.parse(req.body);
-    const user = userStore.findByUsername(username);
+    const user = await userStore.findByUsername(username);
     // Identical message whether the user is unknown or the password is wrong.
     if (!user || !(await userStore.verifyPassword(user, password))) {
       throw new AuthError('Wrong username or password.');
@@ -134,7 +134,7 @@ authRouter.get(
   '/users',
   requireAuth,
   asyncRoute(async (_req, res) => {
-    const users = userStore.list().map((user) => ({
+    const users = (await userStore.list()).map((user) => ({
       id: user.id,
       name: user.name,
       username: user.username,
@@ -174,7 +174,7 @@ authRouter.patch(
     if (!id) throw new AuthError('Please log in again.');
     const { currentPassword, newPassword } = passwordChangeSchema.parse(req.body);
 
-    const user = userStore.findById(id);
+    const user = await userStore.findById(id);
     if (!user) throw new NotFoundError('Account not found.');
     if (!(await userStore.verifyPassword(user, currentPassword))) {
       throw new AuthError('Your current password is not correct.');

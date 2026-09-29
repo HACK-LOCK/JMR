@@ -70,6 +70,19 @@ ordersRouter.get(
   }),
 );
 
+/**
+ * Brands and models this shop has actually repaired, for the new bill screen.
+ *
+ * Registered before `/orders/:id` so "device-hints" is not read as a bill number.
+ */
+ordersRouter.get(
+  '/orders/device-hints',
+  asyncRoute(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    sendData(res, ordersService.deviceHints({ q }));
+  }),
+);
+
 ordersRouter.post(
   '/orders',
   asyncRoute(async (req, res) => {

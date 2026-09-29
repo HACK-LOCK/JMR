@@ -42,25 +42,37 @@ export function SectionEye({
 }
 
 /**
- * Stands in for a hidden section, so its place on the screen is not a hole.
+ * The one way back, shown while anything on the dashboard is put away.
  *
- * The whole strip is the button: it is the eye the text asks for, so a hidden
- * section can be brought back from the same spot it was put away from. It does
- * not need to know which section it is - one correct PIN brings back all four.
+ * Every hidden figure comes back together after one correct PIN, so a busy
+ * counter is not made to answer the same question four times. There is a single
+ * icon and no sentence: the figures were hidden on purpose, and the way to see
+ * them again should be as quiet as hiding them was. The count lives in the
+ * label a screen reader announces and in the long-press tooltip, not on the
+ * screen.
  */
-export function HiddenSectionNote({ label, vis }: { label: string; vis: DashboardVisibility }): JSX.Element {
+export function HiddenSectionsButton({
+  count,
+  vis,
+  className,
+}: {
+  count: number;
+  vis: DashboardVisibility;
+  className?: string;
+}): JSX.Element {
+  const label = count === 1 ? 'Show the hidden figure' : `Show all ${count} hidden figures`;
   return (
     <button
       type="button"
       onClick={() => vis.requestUnhide()}
-      aria-label={`Show ${label}`}
-      title={`Show ${label}`}
-      className="flex min-h-[48px] w-full items-center gap-2.5 rounded-xl border border-dashed px-3 py-2.5 text-left text-2xs font-semibold text-muted-foreground transition-colors hover:bg-secondary"
+      aria-label={label}
+      title={label}
+      className={cn(
+        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary active:bg-secondary',
+        className,
+      )}
     >
-      <EyeOff className="h-4 w-4 shrink-0" />
-      <span className="min-w-0 flex-1">
-        {label} is hidden. Tap to bring it back.
-      </span>
+      <EyeOff className="h-4 w-4" />
     </button>
   );
 }

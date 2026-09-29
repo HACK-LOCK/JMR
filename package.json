@@ -14,13 +14,16 @@
     "build": "npm run build --workspace frontend && npm run build --workspace backend",
     "start": "npm run start --workspace backend",
     "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
-    "test": "npm run test:render && npm run test:api",
+    "test": "npm run test:rules && npm run test:render && npm run test:api",
+    "test:rules": "npm run db:rules --workspace backend",
     "test:render": "npm run check:render --workspace frontend",
     "test:api": "node backend/scripts/run-api-tests.mjs",
     "test:smoke": "node backend/scripts/smoke.mjs",
     "test:e2e": "node backend/scripts/e2e.mjs",
     "setup": "npm install && npm run build",
-    "seed": "npm run seed --workspace backend"
+    "seed": "npm run seed --workspace backend",
+    "db:setup": "npm run db:setup --workspace backend",
+    "db:check": "npm run db:check --workspace backend"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

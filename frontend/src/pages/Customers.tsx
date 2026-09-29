@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DownloadMenu, type DownloadOption } from '@/components/ui/download-menu';
 import { EmptyState, ErrorBlock, LoadingBlock } from '@/components/ui/feedback';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
@@ -316,8 +316,7 @@ function AddCustomerSheet({
         <Field label="Mobile" htmlFor="customer-mobile" error={touched ? mobileError || null : null}>
           <Input
             id="customer-mobile"
-            type="tel"
-            inputMode="numeric"
+            {...numberPad}
             value={form.mobile}
             onChange={(event) =>
               setForm((current) => ({ ...current, mobile: mobileOnly(event.target.value).slice(0, 10) }))
@@ -329,8 +328,7 @@ function AddCustomerSheet({
         <Field label="Alternate Mobile" htmlFor="customer-alt" optional error={touched ? altError || null : null}>
           <Input
             id="customer-alt"
-            type="tel"
-            inputMode="numeric"
+            {...numberPad}
             value={form.altMobile}
             onChange={(event) =>
               setForm((current) => ({ ...current, altMobile: mobileOnly(event.target.value).slice(0, 10) }))

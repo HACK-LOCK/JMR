@@ -89,8 +89,16 @@ export function createQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // Shop data changes constantly on the counter - keep it fresh but calm.
-        staleTime: 20_000,
+        // The bills live in an online database, so more than one device can be
+        // used at the counter. Every screen therefore re-reads on a timer: a
+        // list that only loaded once would keep showing the shop as it was when
+        // the page was opened, which is how two people end up giving the same
+        // customer two different answers. The server answers from memory, so
+        // this is a small request rather than a database query.
+        refetchInterval: 5_000,
+        // Nothing is treated as fresh for long, so navigating always re-reads
+        // and a screen that was left open for a while shows what is there now.
+        staleTime: 0,
         gcTime: 5 * 60_000,
         refetchOnWindowFocus: true,
         retry: (failureCount, error) => {

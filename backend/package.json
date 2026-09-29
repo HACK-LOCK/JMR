@@ -10,9 +10,13 @@
     "start": "node dist/backend/src/index.js",
     "typecheck": "tsc --noEmit",
     "seed": "tsx src/scripts/seed.ts",
-    "google:check": "tsx src/scripts/googleCheck.ts"
+    "google:check": "tsx src/scripts/googleCheck.ts",
+    "db:setup": "tsx src/scripts/postgresSetup.ts",
+    "db:check": "tsx src/scripts/postgresCheck.ts",
+    "db:rules": "tsx src/scripts/dbRules.ts"
   },
   "dependencies": {
+    "@types/pg": "^8.23.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.5",
     "cors": "^2.8.5",
@@ -23,6 +27,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "pdfkit": "^0.15.2",
+    "pg": "^8.23.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

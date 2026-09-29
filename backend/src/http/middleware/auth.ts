@@ -29,25 +29,32 @@ export function signToken(user: AuthUser): string {
   );
 }
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) {
     next(new AuthError('Please log in.'));
     return;
   }
+  let payload: TokenPayload;
   try {
-    const payload = jwt.verify(token, env.jwtSecret) as TokenPayload;
-    const user = userStore.findById(payload.sub);
-    if (!user || !user.active) {
-      next(new AuthError('Please log in again.'));
-      return;
-    }
-    req.user = { id: user.id, name: user.name, username: user.username, role: user.role };
-    next();
+    payload = jwt.verify(token, env.jwtSecret) as TokenPayload;
   } catch {
     next(new AuthError('Your session has expired. Please log in again.'));
+    return;
   }
+  // The account is looked up on every request so that turning someone off takes
+  // effect straight away rather than when their token happens to expire. A
+  // database that cannot be reached fails closed - the person is asked to log in
+  // again rather than being let through unverified - and the health endpoint is
+  // what reports the database itself as down.
+  const user = await userStore.findById(payload.sub).catch(() => undefined);
+  if (!user || !user.active) {
+    next(new AuthError('Please log in again.'));
+    return;
+  }
+  req.user = { id: user.id, name: user.name, username: user.username, role: user.role };
+  next();
 }
 
 export function requireOwner(req: Request, _res: Response, next: NextFunction): void {

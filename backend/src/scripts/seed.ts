@@ -2,17 +2,30 @@
  * Optional demo data so the app can be tried out immediately.
  * Run with:  npm run seed
  * Safe to run more than once - existing data is left alone.
+ *
+ * Refuses to run against a database. These are made up bills, parts and
+ * suppliers, and the shop's real database has to start empty; a demo bill that
+ * lands in the day's takings is not something anybody can notice later.
  */
 import { env } from '../config/env';
-import { initStore, getStore } from '../data';
+import { initStore, getStore, isDatabaseConfigured } from '../data';
 import { initUsers } from '../data/userStore';
 import { mutate } from '../data/mutate';
 import { nowIso } from '../core/id';
 import type { Part, Supplier } from '../../../shared/domain';
 
 async function main(): Promise<void> {
-  await initUsers();
+  if (isDatabaseConfigured()) {
+    console.error(
+      '\n  This is demo data and DATABASE_URL is set, so nothing was added.\n' +
+        '  The shop database stays empty and is filled only by real bills.\n' +
+        '  To try the app out, leave DATABASE_URL empty and run this again.\n',
+    );
+    process.exit(1);
+  }
+
   await initStore();
+  await initUsers();
 
   const existing = getStore().snapshot();
   if (existing.parts.length > 0 || existing.orders.length > 0) {

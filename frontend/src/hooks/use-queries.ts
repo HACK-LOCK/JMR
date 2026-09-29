@@ -471,8 +471,10 @@ export function useDeleteSupplier() {
  */
 export function useStockUnlock() {
   return useMutation({
+    // postKeepingSession, not post: a wrong PIN has to come back as "Wrong PIN"
+    // with the person still signed in, not as a sign-out.
     mutationFn: (pin: string) =>
-      api.post<{ unlocked: boolean; expiresInMinutes: number }>('/auth/stock/unlock', { pin }),
+      api.postKeepingSession<{ unlocked: boolean; expiresInMinutes: number }>('/auth/stock/unlock', { pin }),
   });
 }
 
@@ -482,7 +484,7 @@ export function useStockUnlock() {
  */
 export function useVerifyShopPin() {
   return useMutation({
-    mutationFn: (pin: string) => api.post<{ verified: boolean }>('/auth/pin/verify', { pin }),
+    mutationFn: (pin: string) => api.postKeepingSession<{ verified: boolean }>('/auth/pin/verify', { pin }),
   });
 }
 
@@ -519,7 +521,9 @@ export function useCreateUser() {
 /** Self-service: proves the current password before setting a new one. */
 export function useChangePassword() {
   return useMutation({
+    // patchKeepingSession, not patch: getting the current password wrong is a
+    // wrong answer, and it must not sign the person out of the app.
     mutationFn: (body: { currentPassword: string; newPassword: string }) =>
-      api.patch<{ changed: boolean }>('/auth/password', body),
+      api.patchKeepingSession<{ changed: boolean }>('/auth/password', body),
   });
 }

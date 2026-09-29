@@ -67,6 +67,17 @@ interface RequestOptions {
   body?: unknown;
   formData?: FormData;
   signal?: AbortSignal;
+  /**
+   * Set on a request that asks a question whose wrong answer is a normal result,
+   * such as typing the shop PIN.
+   *
+   * A 401 normally means the session is gone, and the app signs the person out
+   * and shows the login screen. That is the right response to a 401 everywhere
+   * except here, where the person is signed in perfectly well and has simply
+   * typed four wrong digits. Without this, one slip of the finger cost them their
+   * session at the counter.
+   */
+  allowsUnauthorized?: boolean;
 }
 
 /**
@@ -108,7 +119,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!response.ok) {
     const body = payload as { error?: { message?: string; code?: string; details?: string[] } } | null;
     const status = response.status;
-    if (status === 401) {
+    if (status === 401 && !options.allowsUnauthorized) {
       clearSession();
       onUnauthorized?.();
     }
@@ -130,6 +141,19 @@ export const api = {
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   upload: <T>(path: string, formData: FormData) => request<T>(path, { method: 'POST', formData }),
+  /**
+   * For the PIN boxes only. A wrong PIN must show "Wrong PIN" and keep the
+   * person signed in, never bounce them to the login screen.
+   */
+  postKeepingSession: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'POST', body, allowsUnauthorized: true }),
+  /**
+   * For anything that asks the person to prove something they already know -
+   * the current password before a password change. Same reason as the PIN: a
+   * wrong answer must leave them signed in and on the form.
+   */
+  patchKeepingSession: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PATCH', body, allowsUnauthorized: true }),
 };
 
 /**

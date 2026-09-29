@@ -555,7 +555,42 @@ function runSourceChecks(): number {
     for (const problem of hiddenProblems) console.log(`        ${problem}`);
   }
 
-  // 3. The header menu replaces the sign out button, in the order asked for.
+  // 3. Being asked to remember a PIN, or to retype a password, and then being
+  //    signed out for getting it wrong is the worst possible answer to a typo.
+  //    These calls go through the session-preserving helpers, so a rejected
+  //    answer shows on the form instead of ejecting the person to the login
+  //    screen. The 403 half of this is checked by the API suite.
+  const hooksText = fs.readFileSync(path.join(src, 'hooks', 'use-queries.ts'), 'utf8');
+  const sessionProblems: string[] = [];
+  for (const [hook, endpoint] of [
+    ['useStockUnlock', '/auth/stock/unlock'],
+    ['useVerifyShopPin', '/auth/pin/verify'],
+    ['useChangePassword', '/auth/password'],
+  ]) {
+    // Each hook is a short block, so read from its name to the start of the next
+    // exported function. Anchoring on the neighbouring export is steadier than
+    // trying to guess how the block closes.
+    const rest = hooksText.split(`export function ${hook}(`)[1] ?? '';
+    if (rest === '') {
+      sessionProblems.push(`cannot find ${hook}`);
+      continue;
+    }
+    const body = rest.split('export function ')[0] ?? '';
+    if (!/KeepingSession/.test(body)) {
+      sessionProblems.push(
+        `${hook} reaches ${endpoint} without keeping the session, so a wrong answer signs the person out`,
+      );
+    }
+  }
+  if (sessionProblems.length === 0) {
+    console.log('  ok    a wrong PIN or password does not sign the person out');
+  } else {
+    problems += 1;
+    console.log('  FAIL  proving a PIN or password must not end the session');
+    for (const problem of sessionProblems) console.log(`        ${problem}`);
+  }
+
+  // 4. The header menu replaces the sign out button, in the order asked for.
   const shellText = fs.readFileSync(path.join(src, 'components', 'app-shell.tsx'), 'utf8');
   const menuProblems: string[] = [];
   if (/Sign out|LogOut className="h-5 w-5" \/>/.test(shellText) && !/label="Logout"/.test(shellText)) {
@@ -692,7 +727,7 @@ function runSourceChecks(): number {
     for (const problem of statusProblems) console.log(`        ${problem}`);
   }
 
-  // 4. The collapsed sidebar is 76px wide and holds three 48px controls, so
+  // 5. The collapsed sidebar is 76px wide and holds three 48px controls, so
   //    they have to stack there. Laid out in a row they push out of the column.
   const shellFooter = ((): string => {
     const text = fs.readFileSync(path.join(src, 'components', 'app-shell.tsx'), 'utf8');
@@ -714,7 +749,7 @@ function runSourceChecks(): number {
     for (const problem of footerProblems) console.log(`        ${problem}`);
   }
 
-  // 5. Every control needs an id, a name or a label - including inside sheets.
+  // 6. Every control needs an id, a name or a label - including inside sheets.
   const unlabelled: string[] = [];
   const tagPattern = /<(Input|Textarea|Select)\b(?:[^<>]|\{[^{}]*\})*?\/>/g;
   const walk = (dir: string): void => {

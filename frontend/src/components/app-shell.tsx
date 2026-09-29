@@ -248,8 +248,12 @@ function SidebarFooter({
   }, [open]);
 
   return (
-    <div className="space-y-2 border-t p-3">
-      <div ref={blockRef} className="relative">
+    // Collapsed, the column is 76px wide. With p-3 that leaves 52px of usable
+    // width, and a 48px control has almost no room to be centred - which is how
+    // the three controls ended up hanging outside the sidebar. px-2 and
+    // items-center give 60px, so each 48px control sits properly inside.
+    <div className={cn('space-y-2 border-t p-3', collapsed && 'flex items-center px-2')}>
+      <div ref={blockRef} className="relative w-full">
         {open ? (
           <div
             role="menu"
@@ -271,7 +275,11 @@ function SidebarFooter({
         <div
           className={cn(
             'flex items-center gap-2',
-            collapsed && 'flex-col justify-center gap-1.5',
+            // Stacked when collapsed, because three 48px controls are 160px in a
+            // row and the column is 76px. A block row shrink-wraps to the
+            // sidebar and the fixed-width controls then overflow it; a full-width
+            // column stacks them instead, and each one fits on its own line.
+            collapsed && 'w-full flex-col justify-center gap-1.5',
           )}
         >
           <ThemeToggle />

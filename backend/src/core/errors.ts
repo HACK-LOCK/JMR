@@ -46,6 +46,22 @@ export class AuthError extends AppError {
   }
 }
 
+/**
+ * The person is known, but the thing they offered was not accepted - a wrong shop
+ * PIN, for instance.
+ *
+ * This is deliberately not a 401. A 401 means "I do not know who you are", and the
+ * frontend treats that as an expired session and sends the person back to the
+ * login screen. Typing the PIN wrong is an answer to a question, not a broken
+ * session, and it must leave the person signed in so they can simply try again.
+ */
+export class ForbiddenError extends AppError {
+  constructor(message = 'That is not right. Please try again.') {
+    super(message, 403, 'FORBIDDEN');
+    this.name = 'ForbiddenError';
+  }
+}
+
 export class SyncError extends AppError {
   constructor(message = 'Unable to sync right now. Please try again.', details: string[] = []) {
     super(message, 503, 'SYNC_UNAVAILABLE', details);

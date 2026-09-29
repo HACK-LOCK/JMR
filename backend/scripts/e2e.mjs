@@ -785,7 +785,10 @@ async function main() {
   check('the shop PIN brings back the hidden figures', pinVerified.status === 200, pinVerified.json?.data);
 
   const pinWrong = await call('POST', '/auth/stock/unlock', { pin: '0000' });
-  check('a wrong PIN is rejected', pinWrong.status === 401, { status: pinWrong.status });
+  // 403, not 401. A wrong PIN is a wrong answer, and the app signs the person
+  // out on a 401 - so a single mistyped digit used to throw the counter back
+  // to the login screen. 403 keeps them signed in and free to try again.
+  check('a wrong PIN is rejected', pinWrong.status === 403, { status: pinWrong.status });
 
   const pinLetters = await call('POST', '/auth/pin/verify', { pin: 'abcd' });
   check(
@@ -815,7 +818,9 @@ async function main() {
     currentPassword: 'not-the-password',
     newPassword: 'brandnew123',
   });
-  check('wrong current password is rejected', wrongCurrent.status === 401, { status: wrongCurrent.status });
+  // 403, not 401, for the same reason as a wrong PIN: the session is perfectly
+  // valid, the answer was just wrong, and a 401 would sign them out mid-form.
+  check('wrong current password is rejected', wrongCurrent.status === 403, { status: wrongCurrent.status });
 
   const unchanged = await call('POST', '/auth/login', { username: 'ashok', password: 'shop1234' });
   check('password did not change after a failed attempt', unchanged.status === 200, unchanged.status);

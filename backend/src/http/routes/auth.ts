@@ -3,7 +3,7 @@ import type { AuthUser } from '../../../../shared/domain';
 import { env } from '../../config/env';
 import { userStore } from '../../data/userStore';
 import { safeEqual } from '../../core/id';
-import { AuthError, NotFoundError } from '../../core/errors';
+import { AuthError, ForbiddenError, NotFoundError } from '../../core/errors';
 import { requireAuth, signToken } from '../middleware/auth';
 import { asyncRoute, sendData } from '../middleware/respond';
 import {
@@ -26,7 +26,11 @@ function assertPinNotLocked(userId: string): void {
   if (!entry) return;
   if (entry.lockedUntil > Date.now()) {
     const seconds = Math.ceil((entry.lockedUntil - Date.now()) / 1000);
-    throw new AuthError(`Too many wrong tries. Please wait ${seconds} seconds.`);
+    // 403 for the same reason a wrong PIN is 403: the person is signed in and
+    // the PIN is simply not accepted right now. A 401 here meant that five wrong
+    // guesses locked them out of their own app, with no way back in but logging
+    // in again from scratch.
+    throw new ForbiddenError(`Too many wrong tries. Please wait ${seconds} seconds.`);
   }
   pinFailures.delete(userId);
 }
@@ -62,12 +66,17 @@ async function verifyShopPin(userId: string, pin: string): Promise<void> {
   if (!sharedPin) {
     // Misconfiguration, not a wrong guess. Say so plainly: the owner has to set
     // STOCK_PIN, and telling them "wrong PIN" would send them round in circles.
-    throw new AuthError('The shop PIN is not set. Ask the person who set up the app.');
+    // 403, not 401, for the same reason as a wrong PIN - the person is signed in
+    // and a 401 would throw them back to the login screen to fix a server setting.
+    throw new ForbiddenError('The shop PIN is not set. Ask the person who set up the app.');
   }
 
   if (!safeEqual(pin, sharedPin)) {
     recordPinFailure(userId);
-    throw new AuthError('Wrong PIN.');
+    // 403, not 401. A wrong PIN is a wrong answer, not an expired session, and
+    // the frontend signs the person out on a 401. Sending 401 here meant one
+    // mistyped digit threw the counter back to the login screen.
+    throw new ForbiddenError('Wrong PIN.');
   }
   clearPinFailures(userId);
 }
@@ -149,7 +158,9 @@ authRouter.post(
   '/users',
   requireAuth,
   asyncRoute(async (req, res) => {
-    if (req.user?.role !== 'OWNER') throw new AuthError('Not available for this account.');
+    // Signed in, but not allowed to do this. 403, so being an ordinary counter
+    // staff member cannot be mistaken for an expired session and sign them out.
+    if (req.user?.role !== 'OWNER') throw new ForbiddenError('Not available for this account.');
     const input = userCreateSchema.parse(req.body);
     const user = await userStore.create(input);
     sendData(res, {
@@ -177,7 +188,9 @@ authRouter.patch(
     const user = await userStore.findById(id);
     if (!user) throw new NotFoundError('Account not found.');
     if (!(await userStore.verifyPassword(user, currentPassword))) {
-      throw new AuthError('Your current password is not correct.');
+      // A wrong answer to "what is your current password", not an expired
+      // session. 403 keeps the person on the form so they can retype it.
+      throw new ForbiddenError('Your current password is not correct.');
     }
 
     await userStore.update(id, { password: newPassword });

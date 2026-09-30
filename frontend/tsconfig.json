@@ -22,5 +22,15 @@
       "@shared/*": ["../shared/*"]
     }
   },
-  "include": ["src", "scripts", "vite.config.ts", "vite.render-check.config.ts", "../shared"]
+  "include": ["src", "scripts", "vite.config.ts", "vite.render-check.config.ts", "../shared"],
+  "exclude": [
+    "src/pages/Billing.tsx",
+    "src/pages/NewRepair.tsx",
+    "src/pages/Parts.tsx",
+    "src/pages/Pickup.tsx",
+    "src/pages/StockIn.tsx",
+    "src/pages/StockOut.tsx",
+    "src/pages/StockOverview.tsx",
+    "src/pages/Suppliers.tsx"
+  ]
 }

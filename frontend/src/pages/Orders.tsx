@@ -267,7 +267,7 @@ export function BillRow({ order }: { order: OrderListItem }): JSX.Element {
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="tabular text-sm font-black text-primary">{order.id}</span>
               <StatusBadge status={order.status} />
-              <PaymentBadge status={order.paymentStatus} />
+              <PaymentBadge status={order.paymentStatus} payable={order.payable} />
               {order.pendingSync ? (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-bold text-muted-foreground">
                   Not synced

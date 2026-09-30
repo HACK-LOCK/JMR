@@ -1,20 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   Boxes,
   Building2,
+  Download,
   FileSpreadsheet,
   History,
   Lock,
+  Minus,
   Package,
   PackageMinus,
   PackagePlus,
   Pencil,
   Plus,
   Search as SearchIcon,
-  Settings as SettingsIcon,
   Trash2,
+  Upload,
   Wallet,
 } from 'lucide-react';
 import { MiniStat, PageHeader, SectionCard } from '@/components/app-shell';
@@ -32,6 +34,7 @@ import {
   useCreateSupplier,
   useDeletePart,
   useDeleteSupplier,
+  useImportParts,
   useParts,
   useStockIn,
   useStockOut,
@@ -43,12 +46,14 @@ import {
 } from '@/hooks/use-queries';
 import { useDebounced } from '@/lib/hooks';
 import { isValidMobile, mobileOnly, money, plural } from '@/lib/format';
+import { parseStockList, detectBrand, detectCategory } from '@/lib/stock-import';
 import { useStockAccess } from '@/lib/stock-access';
 import { cn } from '@/lib/utils';
 import { CONSUME_MODES, PART_CATEGORIES } from '@shared/domain';
 import type { PartListItem, SupplierListItem } from '@/lib/types';
 import SheetSync from './SheetSync';
 import Settings from './Settings';
+import { LowStockOrderSheet } from '@/components/low-stock-order-sheet';
 
 const TABS = [
   { key: 'items', label: 'All Items', icon: Package },
@@ -57,20 +62,30 @@ const TABS = [
   { key: 'out', label: 'Stock Out', icon: PackageMinus },
   { key: 'suppliers', label: 'Suppliers', icon: Building2 },
   { key: 'sync', label: 'Sheet Sync', icon: FileSpreadsheet },
-  { key: 'settings', label: 'Settings', icon: SettingsIcon },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
 
+export type StockMode = 'home' | 'import' | 'settings';
+
 /**
- * JMR - STOCK. One screen with every stock job on it, behind the PIN:
- * items, low stock, stock in, stock out, suppliers, sheet sync and settings.
+ * JMR - STOCK. One screen with every stock job on it, behind the PIN. The
+ * bottom bar carries the three main doors - Home (items, low stock, stock in
+ * and out, suppliers, sheet sync), Add / Import, and Setting - exactly like
+ * the billing side carries Home / New / Bills.
  */
-export default function StockDesktop(): JSX.Element {
+export default function StockDesktop({ mode = 'home' }: { mode?: StockMode } = {}): JSX.Element {
   const { unlocked, lock } = useStockAccess();
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const raw = params.get('tab') ?? 'items';
   const tab = (TABS.find((entry) => entry.key === raw)?.key ?? 'items') as TabKey;
+
+  // Old links that pointed at import / settings tabs now land on the doors.
+  useEffect(() => {
+    if (raw === 'import') navigate('/stock/import', { replace: true });
+    else if (raw === 'settings') navigate('/stock/settings', { replace: true });
+  }, [raw, navigate]);
 
   const setTab = (next: TabKey): void => {
     const copy = new URLSearchParams(params);
@@ -81,10 +96,25 @@ export default function StockDesktop(): JSX.Element {
 
   if (!unlocked) return <StockGate />;
 
+  if (mode === 'settings') return <Settings />;
+
+  if (mode === 'import') {
+    return (
+      <div className="space-y-4 pb-4">
+        <PageHeader
+          title="Add / Import Stock"
+          subtitle="Add stock to one item or import a whole supplier list"
+        />
+        <StockInSection />
+        <ImportSection />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-4">
       <PageHeader
-        title="JMR — STOCK"
+        title="JMR STOCK" center
         subtitle="Everything about items, suppliers and sync"
         action={
           <Button variant="outline" onClick={lock} className="gap-2">
@@ -124,7 +154,6 @@ export default function StockDesktop(): JSX.Element {
       {tab === 'out' ? <StockOutSection /> : null}
       {tab === 'suppliers' ? <SuppliersSection /> : null}
       {tab === 'sync' ? <SheetSync /> : null}
-      {tab === 'settings' ? <Settings /> : null}
     </div>
   );
 }
@@ -171,17 +200,41 @@ function ItemsSection({ lowOnly = false }: { lowOnly?: boolean }): JSX.Element {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<PartListItem | null>(null);
   const [menuFor, setMenuFor] = useState<PartListItem | null>(null);
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
 
-  const items = data ?? [];
+  const items = useMemo(() => {
+    const list = data ?? [];
+    if (!lowOnly) return list;
+    return [...list].sort((a, b) => {
+      const aCrit = a.quantity < 2 ? 0 : 1;
+      const bCrit = b.quantity < 2 ? 0 : 1;
+      if (aCrit !== bCrit) return aCrit - bCrit;
+      if (a.quantity !== b.quantity) return a.quantity - b.quantity;
+      return a.name.localeCompare(b.name);
+    });
+  }, [data, lowOnly]);
 
   return (
     <SectionCard
       title={lowOnly ? 'Low Stock Items' : 'All Items'}
       icon={lowOnly ? AlertTriangle : Package}
       action={
-        <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" /> Add
-        </Button>
+        <div className="flex items-center gap-2">
+          {lowOnly && items.length > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setOrderModalOpen(true)}
+              className="gap-1.5 border-amber-500/60 bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 font-bold"
+            >
+              <Download className="h-4 w-4" />
+              <span>Order List / Download</span>
+            </Button>
+          ) : null}
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
       }
     >
       {items.length > 5 || search ? (
@@ -214,46 +267,102 @@ function ItemsSection({ lowOnly = false }: { lowOnly?: boolean }): JSX.Element {
           }
         />
       ) : (
-        <ul className="space-y-2">
-          {items.map((part) => (
-            <li
-              key={part.id}
-              className="flex items-center gap-3 rounded-xl border-2 p-2.5"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold">{part.name}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {[part.brand, part.model].filter(Boolean).join(' ') || part.category}
-                  {part.supplierName ? ` · ${part.supplierName}` : ''}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p
-                  className={cn(
-                    'tabular text-base font-black',
-                    part.quantity <= 0
-                      ? 'text-destructive'
-                      : part.low
-                        ? 'text-warning-foreground'
-                        : 'text-foreground',
-                  )}
-                >
-                  {part.quantity}
-                </p>
-                <p className="text-2xs text-muted-foreground">min {part.minQuantity}</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMenuFor(part)}
-                aria-label={`Actions for ${part.name}`}
-                className="shrink-0"
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="w-full border-collapse text-left text-xs">
+            <thead className="sticky top-0 bg-secondary/80 backdrop-blur z-10 border-b">
+              <tr>
+                <th className="w-8 px-3 py-2.5 text-center">
+                  <span className="sr-only">Select</span>
+                </th>
+                <th className="px-3 py-2.5 font-bold text-muted-foreground">Item Description</th>
+                <th className="px-2 py-2.5 font-bold text-center text-muted-foreground">Current Stock</th>
+                <th className="px-3 py-2.5 font-bold text-center text-muted-foreground">Adjust Qty</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {items.map((part) => {
+                const isOut = part.quantity <= 0;
+                const isCritical = part.quantity === 1;
+                const isLow = part.quantity > 0 && (part.low || part.quantity < 2);
+                return (
+                  <tr
+                    key={part.id}
+                    className={cn(
+                      'transition-colors align-middle cursor-pointer hover:bg-muted/50',
+                      isOut && 'border-l-4 border-l-destructive',
+                      isCritical && 'border-l-4 border-l-amber-500',
+                    )}
+                    onClick={() => setMenuFor(part)}
+                  >
+                    {/* Checkbox */}
+                    <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <Pencil
+                        className="h-4 w-4 text-muted-foreground hover:text-foreground cursor-pointer"
+                        onClick={() => setMenuFor(part)}
+                      />
+                    </td>
+
+                    {/* Item Description */}
+                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-black text-sm text-foreground truncate" title={part.name}>
+                            {part.name}
+                          </p>
+                          {isOut ? (
+                            <span className="rounded bg-destructive px-1.5 py-0.5 text-[9px] font-black uppercase text-destructive-foreground">
+                              Out of Stock
+                            </span>
+                          ) : isCritical ? (
+                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-black uppercase text-black">
+                              Critical (1 pc)
+                            </span>
+                          ) : isLow ? (
+                            <span className="rounded bg-amber-400 px-1.5 py-0.5 text-[9px] font-black uppercase text-black">
+                              Low
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-2xs text-muted-foreground truncate">
+                          {[part.brand, part.model].filter(Boolean).join(' ')}
+                          {part.category ? ` · ${part.category}` : ''}
+                          {part.supplierName ? ` · ${part.supplierName}` : ''}
+                        </p>
+                      </div>
+                    </td>
+
+                    {/* Current Stock */}
+                    <td className="px-2 py-2.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      {isOut ? (
+                        <span className="inline-block rounded-full bg-destructive w-8 h-8 flex items-center justify-center text-sm font-black text-destructive-foreground">
+                          0
+                        </span>
+                      ) : isCritical ? (
+                        <span className="inline-block rounded-full bg-amber-500 w-8 h-8 flex items-center justify-center text-sm font-black text-black">
+                          1
+                        </span>
+                      ) : isLow ? (
+                        <span className="inline-block rounded-full bg-amber-400 w-8 h-8 flex items-center justify-center text-sm font-black text-black">
+                          {part.quantity}
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full bg-muted w-8 h-8 flex items-center justify-center text-sm font-bold">
+                          {part.quantity}
+                        </span>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-0.5">min {part.minQuantity}</p>
+                    </td>
+
+                    {/* Adjust Qty - compact stepper matching Order Sheet style */}
+                    <td className="px-3 py-2.5 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      <CompactStepper part={part} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <ItemSheet open={addOpen} onOpenChange={setAddOpen} />
@@ -272,11 +381,142 @@ function ItemsSection({ lowOnly = false }: { lowOnly?: boolean }): JSX.Element {
           setEditing(part);
         }}
       />
+      {lowOnly ? (
+        <LowStockOrderSheet
+          open={orderModalOpen}
+          onOpenChange={setOrderModalOpen}
+          items={items}
+        />
+      ) : null}
     </SectionCard>
   );
 }
 
-/** Add / edit sheet. Two columns on a desktop screen, one on a phone. */
+/**
+ * Compact stepper that shows the LIVE current stock count in the middle.
+ * − removes 1 from stock, + adds 1 to stock. The displayed number is always
+ * the real server value (part.quantity) with an optimistic local offset while
+ * a mutation is in-flight. You can also type any number to set stock directly.
+ */
+function CompactStepper({ part }: { part: PartListItem }): JSX.Element {
+  const toast = useToast();
+  const stockIn = useStockIn();
+  const stockOut = useStockOut();
+  // optimistic offset: how much we've already mutated but server hasn't confirmed yet
+  const [offset, setOffset] = useState(0);
+  // input-mode: when user focuses the field we let them type a target value
+  const [inputVal, setInputVal] = useState<string | null>(null);
+  const busy = stockIn.isPending || stockOut.isPending;
+
+  // Displayed count: server value + pending offset
+  const displayed = part.quantity + offset;
+
+  const add = async (): Promise<void> => {
+    if (busy) return;
+    setOffset((o) => o + 1);
+    try {
+      await stockIn.mutateAsync({
+        partId: part.id,
+        quantity: 1,
+        reason: 'Quick add from items',
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setOffset(0); // server updated, reset optimistic delta
+    } catch (caught) {
+      setOffset((o) => o - 1); // rollback
+      toast.error('Could not add stock', caught instanceof Error ? caught.message : undefined);
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    if (busy || displayed <= 0) return;
+    setOffset((o) => o - 1);
+    try {
+      await stockOut.mutateAsync({
+        partId: part.id,
+        quantity: 1,
+        reason: 'Shelf adjustment',
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setOffset(0); // server updated, reset optimistic delta
+    } catch (caught) {
+      setOffset((o) => o + 1); // rollback
+      toast.error('Could not remove stock', caught instanceof Error ? caught.message : undefined);
+    }
+  };
+
+  // When user types directly in the box and confirms, set stock to that target
+  const commitInput = async (): Promise<void> => {
+    if (inputVal === null) return;
+    const target = Math.max(0, Math.floor(Number(inputVal)) || 0);
+    setInputVal(null);
+    const diff = target - part.quantity;
+    if (diff === 0) return;
+    setOffset(diff);
+    try {
+      if (diff > 0) {
+        await stockIn.mutateAsync({
+          partId: part.id,
+          quantity: diff,
+          reason: 'Manual stock set',
+          idempotencyKey: crypto.randomUUID(),
+        });
+      } else {
+        await stockOut.mutateAsync({
+          partId: part.id,
+          quantity: Math.abs(diff),
+          reason: 'Manual stock set',
+          idempotencyKey: crypto.randomUUID(),
+        });
+      }
+      setOffset(0);
+    } catch (caught) {
+      setOffset(0);
+      toast.error('Could not update stock', caught instanceof Error ? caught.message : undefined);
+    }
+  };
+
+  return (
+    <div className="inline-flex items-center rounded-lg border bg-background shadow-xs">
+      <button
+        type="button"
+        onClick={() => void remove()}
+        disabled={busy || displayed <= 0}
+        className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+        aria-label={`Remove 1 of ${part.name}`}
+        title="Remove 1 from stock"
+      >
+        <Minus className="h-3 w-3" />
+      </button>
+      <input
+        type="number"
+        min={0}
+        value={inputVal !== null ? inputVal : displayed}
+        onFocus={() => setInputVal(String(displayed))}
+        onChange={(e) => setInputVal(e.target.value)}
+        onBlur={() => void commitInput()}
+        onKeyDown={(e) => { if (e.key === 'Enter') void commitInput(); if (e.key === 'Escape') setInputVal(null); }}
+        className={cn(
+          'h-7 w-10 text-center font-black text-xs border-x focus:outline-none bg-transparent transition-colors',
+          displayed <= 0 ? 'text-destructive' : displayed < 2 ? 'text-amber-600 dark:text-amber-400' : '',
+        )}
+        aria-label={`Current stock for ${part.name}`}
+        title="Current stock — type to set directly, or use + / − buttons"
+      />
+      <button
+        type="button"
+        onClick={() => void add()}
+        disabled={busy}
+        className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+        aria-label={`Add 1 of ${part.name}`}
+        title="Add 1 to stock"
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 function ItemSheet({
   open,
   onOpenChange,
@@ -299,17 +539,17 @@ function ItemSheet({
     setForm(
       part
         ? {
-            name: part.name,
-            category: part.category,
-            brand: part.brand,
-            model: part.model,
-            quantity: String(part.quantity),
-            minQuantity: String(part.minQuantity),
-            purchaseCost: String(part.purchaseCost),
-            sellingPrice: String(part.sellingPrice),
-            supplierId: part.supplierId,
-            consumeMode: part.consumeMode,
-          }
+          name: part.name,
+          category: part.category,
+          brand: part.brand,
+          model: part.model,
+          quantity: String(part.quantity),
+          minQuantity: String(part.minQuantity),
+          purchaseCost: String(part.purchaseCost),
+          sellingPrice: String(part.sellingPrice),
+          supplierId: part.supplierId,
+          consumeMode: part.consumeMode,
+        }
         : emptyItemForm(),
     );
   }, [open, part]);
@@ -362,7 +602,16 @@ function ItemSheet({
           <Input
             id="item-name"
             value={form.name}
-            onChange={(event) => set('name', event.target.value)}
+            onChange={(event) => {
+              const val = event.target.value;
+              set('name', val);
+              if (!part) {
+                const autoBrand = detectBrand(val);
+                const autoCat = detectCategory(val);
+                if (autoBrand && !form.brand) set('brand', autoBrand);
+                if (autoCat && (!form.category || form.category === 'Repair Part')) set('category', autoCat);
+              }
+            }}
             placeholder="Mobile display"
             invalid={touched && Boolean(nameError)}
           />
@@ -673,6 +922,177 @@ function StockInSection(): JSX.Element {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Import a supplier list                                               */
+/* ------------------------------------------------------------------ */
+
+const EXPORT_EXAMPLE = `Samsung
+Charger 5
+Earphones 3
+Back Cover 10`;
+
+function ImportSection(): JSX.Element {
+  const toast = useToast();
+  const importParts = useImportParts();
+  const [text, setText] = useState('');
+  const [fileName, setFileName] = useState('');
+
+  const plan = useMemo(() => parseStockList(text), [text]);
+  const ready = plan.rows.length > 0 && !importParts.isPending;
+
+
+
+
+
+
+
+
+  const run = async (): Promise<void> => {
+    if (!ready) return;
+    try {
+      const response = await importParts.mutateAsync({
+        items: plan.rows.map((row) => ({
+          name: row.name,
+          brand: row.brand,
+          category: row.category,
+          quantity: row.quantity,
+        })),
+        idempotencyKey: crypto.randomUUID(),
+      });
+      const created = response.data?.created ?? 0;
+      const toppedUp = response.data?.toppedUp ?? 0;
+      const bits = [created > 0 ? `${created} new` : '', toppedUp > 0 ? `${toppedUp} topped up` : ''].filter(Boolean);
+      toast.success('Stock imported', bits.join(', ') || 'Nothing changed');
+      setText('');
+      setFileName('');
+    } catch (caught) {
+      toast.error('Could not import stock', caught instanceof Error ? caught.message : undefined);
+    }
+  };
+
+  const pickFile = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setText(typeof reader.result === 'string' ? reader.result : '');
+      setFileName(file.name);
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <SectionCard title="Import Stock" icon={Upload}>
+      <InlineNotice>
+        Paste a supplier list or upload a <strong>.txt</strong> / <strong>.csv</strong> sheet. A brand
+        on its own line, then one item per line with its quantity before or after the name; a{' '}
+        <strong>-</strong> or <strong>=</strong> in front of the number is fine (<code>Samsung</code>,{' '}
+        <code>Battery -5</code>, <code>=2 Charger</code>). Names that start with a known brand are
+        filed under it and part names are filed into their section (e.g. <strong>OPPO</strong> Battery
+        lands under Oppo in Battery) automatically.
+      </InlineNotice>
+
+      <pre className="overflow-x-auto rounded-xl border-2 bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
+        {EXPORT_EXAMPLE}
+      </pre>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border-2 border-primary bg-primary px-4 text-sm font-bold text-primary-foreground">
+          <Upload className="h-4 w-4" /> Choose a file
+          <input
+            type="file"
+            id="import-file"
+            name="import-file"
+            accept=".txt,.csv,text/plain,text/csv"
+            onChange={pickFile}
+            className="hidden"
+          />
+        </label>
+        {fileName ? <p className="truncate text-sm text-muted-foreground">{fileName}</p> : null}
+      </div>
+
+      <Field label="Or paste the list here" htmlFor="import-list" optional>
+        <Textarea
+          id="import-list"
+          name="import-list"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={EXPORT_EXAMPLE}
+          className="min-h-[140px] font-mono text-sm"
+        />
+      </Field>
+
+      {plan.rows.length > 0 ? (
+        <div className="rounded-xl border-2 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              {plan.rows.length} item{plan.rows.length === 1 ? '' : 's'} ready
+            </p>
+            <Button
+              size="sm"
+              loading={importParts.isPending}
+              loadingText="Importing..."
+              disabled={!ready}
+              className="gap-1.5"
+              onClick={() => void run()}
+            >
+              <Upload className="h-4 w-4" /> Import now
+            </Button>
+          </div>
+          <ul className="space-y-2">
+            {plan.grouped.map((bGroup) => (
+              <li key={bGroup.brand || '(no brand)'} className="rounded-xl border bg-card/60 p-2.5">
+                <p className="text-2xs font-bold uppercase tracking-wider text-muted-foreground">
+                  {bGroup.brand.toUpperCase() || 'No brand'}
+                </p>
+                <ul className="mt-0.5">
+                  {bGroup.categories.map((cGroup) => (
+                    <div key={cGroup.category} className="rounded-lg border bg-muted/30 p-2 my-1.5 space-y-1">
+                      <div className="flex items-center justify-between mb-1 pb-1 border-b border-border/40">
+                        <span className="text-[11px] font-bold text-foreground">
+                          {cGroup.category} Section
+                        </span>
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                          {cGroup.rows.length} {cGroup.rows.length === 1 ? 'part' : 'parts'} ({cGroup.totalUnits} pcs)
+                        </span>
+                      </div>
+                      {cGroup.rows.map((row, index) => (
+                        <li
+                          key={`${row.name}-${index}`}
+                          className="flex items-center justify-between gap-3 text-sm"
+                        >
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate">{row.name}</span>
+                            {row.category !== 'Repair Part' ? (
+                              <span className="shrink-0 rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-warning-foreground">
+                                {row.category}
+                              </span>
+                            ) : null}
+                          </div>
+                          <span className="shrink-0 tabular font-bold">{row.quantity}</span>
+                        </li>
+                      ))}
+                    </div>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {plan.skipped.length > 0 ? (
+        <InlineNotice tone="warning">
+          {plan.skipped.length} line{plan.skipped.length === 1 ? '' : 's'} could not be read:{' '}
+          {plan.skipped.slice(0, 3).join(' Â· ')}
+          {plan.skipped.length > 3 ? ` Â· and ${plan.skipped.length - 3} more` : ''}
+        </InlineNotice>
+      ) : null}
+    </SectionCard>
+  );
+}
+
 function StockOutSection(): JSX.Element {
   const toast = useToast();
   const stockOut = useStockOut();
@@ -875,7 +1295,7 @@ function SuppliersSection(): JSX.Element {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold">{supplier.name}</p>
                 <p className="tabular truncate text-xs text-muted-foreground">
-                  {supplier.mobile || 'No number'} · {plural(supplier.itemCount, 'item')}
+                  {supplier.mobile || 'No number'} Â· {plural(supplier.itemCount, 'item')}
                 </p>
               </div>
               <Button
@@ -1044,3 +1464,4 @@ function SupplierSheet({
     </Sheet>
   );
 }
+

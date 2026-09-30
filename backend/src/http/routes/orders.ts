@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { ORDER_STATUSES, type OrderStatus } from '../../../../shared/domain';
 import { requireAuth, actorName } from '../middleware/auth';
 import { asyncRoute, param, sendData } from '../middleware/respond';
 import { billsService, dashboardService, exportsService, ordersService, searchService } from '../../services';
+import { deviceLogService } from '../../services/deviceLogs';
 import type { OrderScope } from '../../services/orders';
 import type { SearchScope } from '../../services/search';
 import {
@@ -11,6 +12,7 @@ import {
   orderPartAddSchema,
   orderUpdateSchema,
   paymentCreateSchema,
+  paymentUpdateSchema,
   statusChangeSchema,
 } from '../../validation/schemas';
 
@@ -83,11 +85,27 @@ ordersRouter.get(
   }),
 );
 
+function reqDeviceInfo(req: Request) {
+  const devId = (req.headers['x-device-id'] as string) || 'UNKNOWN';
+  const rawDevName = (req.headers['x-device-name'] as string) || 'Web Device';
+  return { devId, devName: decodeURIComponent(rawDevName) };
+}
+
 ordersRouter.post(
   '/orders',
   asyncRoute(async (req, res) => {
     const input = orderCreateSchema.parse(req.body);
     const result = await ordersService.createOrder(input, actorName(req));
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'NEW_BILL',
+      tag: 'New Bill Added',
+      orderId: result.data.id,
+      detail: `${result.data.customerName} · ${result.data.brand} ${result.data.model}`,
+    });
     res.status(201);
     sendData(res, result.data, result.warning);
   }),
@@ -104,7 +122,17 @@ ordersRouter.patch(
   '/orders/:id',
   asyncRoute(async (req, res) => {
     const patch = orderUpdateSchema.parse(req.body);
-    const result = await ordersService.updateOrder(param(req, 'id'), patch);
+    const orderId = param(req, 'id');
+    const result = await ordersService.updateOrder(orderId, patch);
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'EDIT_BILL',
+      tag: 'Bill Modified',
+      orderId,
+    });
     sendData(res, result.data, result.warning);
   }),
 );
@@ -113,7 +141,17 @@ ordersRouter.post(
   '/orders/:id/status',
   asyncRoute(async (req, res) => {
     const { status } = statusChangeSchema.parse(req.body);
-    const result = await ordersService.changeStatus(param(req, 'id'), status, actorName(req));
+    const orderId = param(req, 'id');
+    const result = await ordersService.changeStatus(orderId, status, actorName(req));
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'STATUS',
+      tag: `Status -> ${status}`,
+      orderId,
+    });
     sendData(res, result.data, result.warning);
   }),
 );
@@ -122,7 +160,18 @@ ordersRouter.post(
   '/orders/:id/deliver',
   asyncRoute(async (req, res) => {
     const { deliveredTo } = deliverSchema.parse(req.body ?? {});
-    const result = await ordersService.deliver(param(req, 'id'), deliveredTo, actorName(req));
+    const orderId = param(req, 'id');
+    const result = await ordersService.deliver(orderId, deliveredTo, actorName(req));
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'STATUS',
+      tag: 'Status -> Delivered',
+      orderId,
+      detail: deliveredTo ? `Given to ${deliveredTo}` : undefined,
+    });
     sendData(res, result.data, result.warning);
   }),
 );
@@ -133,7 +182,18 @@ ordersRouter.post(
   '/orders/:id/parts',
   asyncRoute(async (req, res) => {
     const input = orderPartAddSchema.parse(req.body);
-    const result = await ordersService.addOrderPart(param(req, 'id'), input);
+    const orderId = param(req, 'id');
+    const result = await ordersService.addOrderPart(orderId, input);
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'PART',
+      tag: 'Item Fitted',
+      orderId,
+      detail: input.name,
+    });
     sendData(res, result.data, result.warning);
   }),
 );
@@ -168,8 +228,32 @@ ordersRouter.post(
   '/orders/:id/payments',
   asyncRoute(async (req, res) => {
     const input = paymentCreateSchema.parse(req.body);
-    const result = await ordersService.recordPayment(param(req, 'id'), input, actorName(req));
+    const orderId = param(req, 'id');
+    const result = await ordersService.recordPayment(orderId, input, actorName(req));
+    const { devId, devName } = reqDeviceInfo(req);
+    void deviceLogService.recordLog({
+      devId,
+      devName,
+      user: actorName(req),
+      action: 'PAYMENT',
+      tag: `Payment Added (₹${input.amount})`,
+      orderId,
+      detail: input.mode,
+    });
     res.status(201);
+    sendData(res, result.data, result.warning);
+  }),
+);
+
+ordersRouter.patch(
+  '/orders/:id/payments/:paymentId',
+  asyncRoute(async (req, res) => {
+    const input = paymentUpdateSchema.parse(req.body);
+    const result = await ordersService.updatePayment(
+      param(req, 'id'),
+      param(req, 'paymentId'),
+      input,
+    );
     sendData(res, result.data, result.warning);
   }),
 );

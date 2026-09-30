@@ -20,6 +20,8 @@
     "test:api": "node backend/scripts/run-api-tests.mjs",
     "test:smoke": "node backend/scripts/smoke.mjs",
     "test:e2e": "node backend/scripts/e2e.mjs",
+    "test:pin": "npm run check:pin --workspace frontend",
+    "test:zero": "npm run check:zero --workspace frontend",
     "setup": "npm install && npm run build",
     "seed": "npm run seed --workspace backend",
     "db:setup": "npm run db:setup --workspace backend",

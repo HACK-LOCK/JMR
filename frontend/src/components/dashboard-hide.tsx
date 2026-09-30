@@ -10,7 +10,7 @@ import type { DashboardVisibility, HiddenSection } from '@/lib/dashboard-section
 
 /**
  * The eye that sits on a dashboard section. One tap puts the section away, and
- * one tap on a hidden section asks for the shop PIN. The PIN is checked by the
+ * one tap on a hidden section asks for the owner PIN. The PIN is checked by the
  * server and is never shown, stored or hinted at anywhere in the app.
  */
 export function SectionEye({
@@ -138,8 +138,10 @@ export function UnhideSheet({
             autoComplete="off"
             autoFocus
             value={pin}
-            // Digits only, and it stays masked - see the note in stock-gate.tsx
-            // about why numberPad is not spread into a password field.
+            // Digits only, and it stays masked - spreading numberPad from
+            // components/ui/input.tsx would also switch it to a plain text box,
+            // which is the whole point of the note next to it. This field is a
+            // password first, a number pad second.
             pattern="[0-9]*"
             onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 12))}
             placeholder="Enter PIN"

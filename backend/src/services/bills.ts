@@ -46,14 +46,26 @@ export interface EnsureBillResult {
  * Returns `saved: false` (never throws) when Drive is not connected, so the
  * repair workflow is never blocked by Google being offline.
  */
-export async function ensureBill(orderId: string): Promise<EnsureBillResult> {
+export async function ensureBill(
+  orderId: string,
+  options: { quietWhenNotConnected?: boolean } = {},
+): Promise<EnsureBillResult> {
   const rootFolderId = readDriveFolderId();
   if (!driveReady(rootFolderId)) {
+    // Plain "not set up yet" is not a failure of this action - the bills stay on
+    // this computer until the owner connects a folder. Callers that save a bill
+    // only as a side effect of an edit, a payment or a status change ask for the
+    // quiet form, so the counter is not told the same setup sentence after every
+    // single step. The Sheet Sync screen is where that setup lives.
     return {
       saved: false,
       fileId: '',
       link: '',
-      message: rootFolderId ? 'Google Drive is not connected.' : NO_DRIVE_FOLDER_MESSAGE,
+      message: options.quietWhenNotConnected
+        ? ''
+        : rootFolderId
+          ? 'Google Drive is not connected.'
+          : NO_DRIVE_FOLDER_MESSAGE,
     };
   }
   const bundle = billBundle(orderId);

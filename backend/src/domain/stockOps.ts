@@ -1,4 +1,4 @@
-import type { OrderPart, Part, StockMovement, StockMovementType } from '../../../shared/domain';
+import type { ConsumeMode, OrderPart, Part, StockMovement, StockMovementType } from '../../../shared/domain';
 import { round2 } from '../../../shared/domain';
 import type { Database } from '../data/database';
 import { ConflictError, NotFoundError, ValidationError } from '../core/errors';
@@ -148,25 +148,48 @@ export function applyAdjust(
 /* Order part reservation (no stock change until the part is consumed) */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Puts a line on a bill. `partId` picks an item off the price list, which is
+ * the only way the shop owns stock behind the line. A blank `partId` with a
+ * `name` is a line typed in at the counter: it is billed, printed and totalled
+ * exactly the same, but it has no stock item, so it can never be marked used
+ * and never moves stock.
+ */
 export function reserveOrderPart(
   draft: Database,
-  input: { orderId: string; partId: string; quantity: number; unitPrice: number },
+  input: { orderId: string; partId?: string; name?: string; quantity: number; unitPrice: number },
 ): OrderPart {
   assertQuantity(input.quantity);
-  const part = findPart(draft, input.partId);
   if (input.unitPrice < 0) throw new ValidationError('Price cannot be negative.');
 
   const now = nowIso();
+  const partId = (input.partId ?? '').trim();
+  const typedName = (input.name ?? '').trim();
+
+  let linePartId = partId;
+  let lineName = typedName;
+  let consumeMode: ConsumeMode = 'PART_USED';
+  if (partId) {
+    const part = findPart(draft, partId);
+    linePartId = part.id;
+    // A typed name must never rename a price list item - the price list is the
+    // shop's record and one bill line should not rewrite it.
+    lineName = part.name;
+    consumeMode = part.consumeMode;
+  } else if (!typedName) {
+    throw new ValidationError('Type a name for this line.');
+  }
+
   const line: OrderPart = {
     id: newId('OP'),
     orderId: input.orderId,
-    partId: part.id,
-    partName: part.name,
+    partId: linePartId,
+    partName: lineName,
     quantity: input.quantity,
     unitPrice: round2(input.unitPrice),
     consumed: false,
     consumedAt: '',
-    consumeMode: part.consumeMode,
+    consumeMode,
     createdAt: now,
     updatedAt: now,
   };
@@ -195,6 +218,11 @@ export function consumeOrderPart(
   const line = draft.orderParts.find((item) => item.id === input.lineId && item.orderId === input.orderId);
   if (!line) throw new NotFoundError('Part line not found on this order.');
   if (line.consumed) throw new ConflictError('This part is already marked as used.');
+  // A line typed in at the counter has no stock item behind it, so there is
+  // nothing to take out. Say so plainly rather than failing on a blank part id.
+  if (!line.partId) {
+    throw new ConflictError(`${line.partName} was typed in on this bill and is not a stock item.`);
+  }
 
   const part = findPart(draft, line.partId);
   const { movement } = applyStockOut(draft, {
@@ -247,7 +275,12 @@ export function consumeDeliveryConsumables(
   input: { orderId: string; user: string },
 ): { part: Part; movement: StockMovement }[] {
   const lines = draft.orderParts.filter(
-    (line) => line.orderId === input.orderId && !line.consumed && line.consumeMode === 'DELIVERY',
+    (line) =>
+      line.orderId === input.orderId &&
+      !line.consumed &&
+      line.consumeMode === 'DELIVERY' &&
+      // A typed line owns no stock, so delivery must not try to take any out.
+      Boolean(line.partId),
   );
   const done: { part: Part; movement: StockMovement }[] = [];
   for (const line of lines) {

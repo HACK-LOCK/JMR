@@ -7,25 +7,61 @@ export type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   hint?: string;
 };
 
+/**
+ * The one rule for Enter in any text field in the whole app: it moves to the
+ * next field, and it does nothing else. No silent form submit, no accidental
+ * save, no stray action. On the last field of a screen it does nothing at all.
+ *
+ * Single-line inputs (phone numbers, amounts, names...) are where the shop
+ * steps through a form, and the phone's "next key" and the desktop Enter key
+ * should mean the same thing here. Textareas keep their Enter = new line, and
+ * fields with their own Enter behaviour (the suggestion picker) run theirs on
+ * top, so a confirmed suggestion can still carry the employee to the next step.
+ */
+function moveToNextField(
+  event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+): void {
+  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+  const current = event.currentTarget;
+  const root = (current.closest('form') ?? document) as ParentNode;
+  const editable = Array.from(
+    root.querySelectorAll<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>(
+      'input:not([type="hidden"]):not([disabled]):not([readonly]), ' +
+        'select:not([disabled]), textarea:not([disabled]):not([readonly])',
+    ),
+  );
+  const index = editable.indexOf(current as typeof editable[number]);
+  const next = editable[index + 1];
+  event.preventDefault();
+  if (next) next.focus();
+}
+
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, invalid, hint, ...props }, ref) => (
-    <div className="w-full">
-      <input
-        type={type}
-        ref={ref}
-        aria-invalid={invalid || undefined}
-        className={cn(
-          'flex h-12 w-full rounded-xl border-2 border-input bg-background px-4 py-2 text-base transition-colors',
-          'placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-primary',
-          'disabled:cursor-not-allowed disabled:opacity-60',
-          invalid && 'border-destructive focus-visible:ring-destructive',
-          className,
-        )}
-        {...props}
-      />
-      {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
-    </div>
-  ),
+  ({ className, type, invalid, hint, onKeyDown, ...props }, ref) => {
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+      if (event.key === 'Enter') moveToNextField(event);
+      onKeyDown?.(event);
+    };
+    return (
+      <div className="w-full">
+        <input
+          type={type}
+          ref={ref}
+          aria-invalid={invalid || undefined}
+          onKeyDown={handleKeyDown}
+          className={cn(
+            'flex h-12 w-full rounded-xl border-2 border-input bg-background px-4 py-2 text-base transition-colors',
+            'placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-primary',
+            'disabled:cursor-not-allowed disabled:opacity-60',
+            invalid && 'border-destructive focus-visible:ring-destructive',
+            className,
+          )}
+          {...props}
+        />
+        {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
+      </div>
+    );
+  },
 );
 Input.displayName = 'Input';
 

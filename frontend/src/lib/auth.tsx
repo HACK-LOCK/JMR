@@ -10,6 +10,7 @@ import {
   setUnauthorizedHandler,
 } from './api';
 import { api } from './api';
+import { hideAllDashboardSections } from './dashboard-sections';
 
 interface AuthValue {
   user: AuthUser | null;
@@ -67,6 +68,9 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         });
         setSession(response.data.token, response.data.user);
         setUser(response.data.user);
+        // A fresh sign-in starts with the dashboard figures put away. The owner
+        // brings them back with the PIN, and each new session hides them again.
+        hideAllDashboardSections();
       },
       signOut: () => {
         clearSession();

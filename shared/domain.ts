@@ -36,12 +36,13 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
  *
  * ORDER_STATUSES stays the full set of values a stored bill may still hold, so
  * bills written before this trim keep reading, filtering and printing exactly
- * as they did. This is the shortlist the status sheet offers, not a narrowing
+ * as they did. This is the shortlist the status buttons offer, not a narrowing
  * of what the server accepts.
  */
 export const COUNTER_STATUSES = [
   'Received',
   'Repairing',
+  'Ready',
   'Delivered',
   'Cancelled',
 ] as const satisfies readonly OrderStatus[];
@@ -99,6 +100,18 @@ export const STOCK_MOVEMENT_LABELS: Record<StockMovementType, string> = {
 export const PART_CATEGORIES = [
   'Repair Part',
   'Repair Material',
+  'Battery',
+  'Display',
+  'Charger',
+  'Back Cover',
+  'Tempered Glass',
+  'Speaker',
+  'Mic',
+  'Camera',
+  'Earphone',
+  'Circuit',
+  'Button',
+  'Connector',
   'Folder',
   'Accessory',
   'Other',
@@ -426,11 +439,20 @@ export function balanceAmount(
   return Math.max(0, round2(payableAmount(order) - order.paidAmount));
 }
 
+/**
+ * A bill can be opened before anyone knows what the repair will cost, so a zero
+ * total is a real state and not a mistake. It is reported as Unpaid, not Paid:
+ * nothing has been charged and nothing has been received, and calling it Paid
+ * would let a device be handed over for a repair nobody has quoted yet. Once a
+ * real figure is on the bill the usual rules apply again.
+ */
 export function derivePaymentStatus(
   order: Pick<RepairOrder, 'finalAmount' | 'discount' | 'paidAmount'>,
 ): PaymentStatus {
   const payable = payableAmount(order);
-  if (payable <= 0) return 'Paid';
+  if (payable <= 0) {
+    return round2(order.paidAmount) > 0 ? 'Paid' : 'Unpaid';
+  }
   const paid = round2(order.paidAmount);
   if (paid <= 0) return 'Unpaid';
   if (paid + 0.009 >= payable) return 'Paid';
@@ -455,7 +477,7 @@ export function isClosedStatus(status: OrderStatus): boolean {
 }
 
 export function isLowStock(part: Pick<Part, 'quantity' | 'minQuantity' | 'active'>): boolean {
-  return part.active && part.quantity <= part.minQuantity;
+  return part.active && (part.quantity < 2 || part.quantity <= (part.minQuantity ?? 0));
 }
 
 /* ------------------------------------------------------------------ */

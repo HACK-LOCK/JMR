@@ -23,6 +23,7 @@ import {
   orderPartsTotal,
   recalcOrder,
   removePayment,
+  updatePayment as correctPayment,
 } from '../domain/orderOps';
 import {
   consumeOrderPart,
@@ -408,7 +409,9 @@ export async function createOrder(
   const warnings = result.warning
     ? [result.warning]
     : [];
-  const bill = await ensureBill(result.data);
+  // Saving to Drive is a side effect here, not the point of the action, so an
+  // unconnected folder stays quiet - the Sheet Sync screen says that already.
+  const bill = await ensureBill(result.data, { quietWhenNotConnected: true });
   if (!bill.saved && bill.message) {
     warnings.push({ code: 'BILL_PENDING', message: `Order saved. ${bill.message}` });
   }
@@ -462,7 +465,7 @@ export async function updateOrder(
     return null;
   });
 
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -498,7 +501,7 @@ export async function changeStatus(
     return null;
   });
 
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -516,7 +519,7 @@ function mergeBill(
 
 export async function addOrderPart(
   orderId: string,
-  input: { partId: string; quantity: number; unitPrice: number },
+  input: { partId: string; name: string; quantity: number; unitPrice: number },
 ): Promise<MutationResult<OrderWithParts>> {
   const result = await mutate((draft) => {
     const order = findOrder(draft, orderId);
@@ -529,7 +532,7 @@ export async function addOrderPart(
     recalcOrder(draft, order);
     return { id: orderId };
   });
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -546,7 +549,7 @@ export async function deleteOrderPart(
     recalcOrder(draft, order);
     return { id: orderId };
   });
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -560,7 +563,7 @@ export async function useOrderPart(
     consumeOrderPart(draft, { orderId, lineId, user });
     return null;
   });
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -592,7 +595,24 @@ export async function recordPayment(
     addPayment(draft, { orderId, ...input, user });
     return null;
   });
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
+  return mergeBill(result, orderId, bill.saved, bill.message);
+}
+
+/**
+ * Corrects a payment already taken. The original row is changed, so the bill
+ * reads as though the right amount had been received all along.
+ */
+export async function updatePayment(
+  orderId: string,
+  paymentId: string,
+  input: { amount: number; mode?: string; note?: string },
+): Promise<MutationResult<OrderWithParts>> {
+  const result = await mutate((draft) => {
+    correctPayment(draft, { orderId, paymentId, ...input });
+    return { id: orderId };
+  });
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 
@@ -619,7 +639,7 @@ export async function deliver(
     deliverOrder(draft, { orderId, deliveredTo, user, from: order.status });
     return null;
   });
-  const bill = await ensureBill(orderId);
+  const bill = await ensureBill(orderId, { quietWhenNotConnected: true });
   return mergeBill(result, orderId, bill.saved, bill.message);
 }
 

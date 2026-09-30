@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "check:render": "vite build --config vite.render-check.config.ts --logLevel warn && node .render-check/render-check.mjs"
+    "check:render": "vite build --config vite.render-check.config.ts --logLevel warn && node .render-check/render-check.mjs",
+    "check:pin": "node scripts/pin-check.mjs",
+    "check:zero": "node scripts/zero-check.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",

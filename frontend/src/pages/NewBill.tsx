@@ -22,7 +22,6 @@ import {
   useCreateOrder,
   useCustomers,
   useNextOrderId,
-  useSettings,
 } from '@/hooks/use-queries';
 import { DEVICE_CONDITIONS, DEVICE_TYPES, PAYMENT_MODES } from '@shared/domain';
 import { dateOnly, isValidMobile, mobileOnly, money, plusDaysIso } from '@/lib/format';
@@ -84,7 +83,6 @@ export default function NewBill(): JSX.Element {
   const toast = useToast();
   const createOrder = useCreateOrder();
   const { data: nextId } = useNextOrderId();
-  const { data: settings } = useSettings();
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [touched, setTouched] = useState(false);
@@ -156,7 +154,7 @@ export default function NewBill(): JSX.Element {
       });
       if (response.warning) toast.warning(response.warning.message);
       else toast.success('Bill saved', `${response.data.id} is ready.`);
-      navigate(`/orders/${response.data.id}?new=1`);
+      navigate(`/orders/${response.data.id}`);
     } catch (error) {
       toast.error('Could not save the bill', error instanceof Error ? error.message : undefined);
     }
@@ -177,10 +175,6 @@ export default function NewBill(): JSX.Element {
           ) : null
         }
       />
-
-      {settings?.serviceDescription ? (
-        <InlineNotice tone="info">{settings.serviceDescription}</InlineNotice>
-      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div className="space-y-4">
@@ -350,16 +344,21 @@ export default function NewBill(): JSX.Element {
               <CardTitle>3. Amount</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Field label="Bill Amount" htmlFor="estimatedAmount">
+              <Field label="Bill Amount" htmlFor="estimatedAmount" optional>
                 <Input
                   id="estimatedAmount"
                   type="number"
                   inputMode="decimal"
+                  min="0"
                   value={form.estimatedAmount}
                   onChange={(event) => set('estimatedAmount', event.target.value)}
                   placeholder="0"
                   className="h-16 text-3xl font-black"
                 />
+                <p className="text-sm text-muted-foreground">
+                  Not sure the price yet? Leave this empty. The bill opens at 0 and you set
+                  the amount later from the bill.
+                </p>
               </Field>
 
               <div className="grid grid-cols-2 gap-3">

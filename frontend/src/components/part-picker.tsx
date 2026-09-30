@@ -3,6 +3,7 @@ import { Check, Package, Search as SearchIcon } from 'lucide-react';
 import { useDebounced } from '@/lib/hooks';
 import { useParts } from '@/hooks/use-queries';
 import { Sheet } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LoadingBlock, EmptyState } from '@/components/ui/feedback';
 import { ConsumeBadge } from '@/components/status-badge';
@@ -101,7 +102,7 @@ export function PartPicker({
                     <p
                       className={cn(
                         'tabular text-base font-black',
-                        outOfStock ? 'text-destructive' : part.low ? 'text-warning-foreground' : 'text-success',
+                        outOfStock ? 'text-destructive' : (part.low || part.quantity < 2) ? 'text-amber-500' : 'text-success',
                       )}
                     >
                       {part.quantity}
@@ -127,3 +128,47 @@ export function PartPicker({
     </Sheet>
   );
 }
+
+export interface PickedPart {
+  partId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  available: number;
+  consumeMode: string;
+}
+
+export function PartLineEditor({
+  line,
+  onChange,
+  onRemove,
+}: {
+  line: PickedPart;
+  onChange: (next: PickedPart) => void;
+  onRemove: () => void;
+}): JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border-2 p-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-bold">{line.name}</p>
+        <p className="text-xs text-muted-foreground">{money(line.unitPrice)} each</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={1}
+          max={line.available}
+          value={line.quantity}
+          onChange={(e) =>
+            onChange({ ...line, quantity: Math.min(line.available, Math.max(1, Number(e.target.value) || 1)) })
+          }
+          className="w-16 text-center tabular"
+        />
+        <Button variant="ghost" size="sm" onClick={onRemove}>
+          Remove
+        </Button>
+      </div>
+    </div>
+  );
+}
+

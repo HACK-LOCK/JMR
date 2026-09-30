@@ -122,21 +122,53 @@ export const statusChangeSchema = z.object({
   note: trimmed.max(300).optional().default(''),
 });
 
-export const orderPartAddSchema = z.object({
-  partId: trimmed.min(1, 'Choose a part'),
-  quantity: z.coerce.number().int().min(1).max(999),
-  unitPrice: money.optional().default(0),
-});
+/**
+ * A bill line can come from the price list, or be typed in at the counter as a
+ * plain name and price. A typed line has no stock item behind it, so it is
+ * billed and printed like any other line but never takes stock out - the shop
+ * has not said it owns that item.
+ */
+export const orderPartAddSchema = z
+  .object({
+    partId: trimmed.optional().default(''),
+    name: trimmed.max(120).optional().default(''),
+    quantity: z.coerce.number().int().min(1).max(999),
+    unitPrice: money.optional().default(0),
+  })
+  .refine((input) => Boolean(input.partId || input.name), {
+    message: 'Choose an item or type a name',
+    path: ['name'],
+  });
 
+/**
+ * Taking a payment. 0 is a valid amount: sometimes nothing is collected and the
+ * counter still wants that written on the bill. Negative amounts are refused
+ * here, before the domain ever sees the request.
+ */
 export const paymentCreateSchema = z.object({
   amount: z.coerce
     .number()
-    .min(1, 'Amount must be more than 0')
+    .min(0, 'Amount cannot be negative')
     .max(9_999_999, 'Amount is too large')
     .refine((n) => Number.isFinite(n), 'Invalid amount'),
   mode: paymentModeEnum.optional().default('Cash'),
   note: trimmed.max(200).optional().default(''),
   idempotencyKey: trimmed.max(80).optional().default(''),
+});
+
+/**
+ * Correcting a payment already taken. The original row is changed in place - no
+ * second row, no reversal - so the bill's paid figure, balance and payment
+ * status are the only place the correction shows up.
+ */
+export const paymentUpdateSchema = z.object({
+  amount: z.coerce
+    .number()
+    .min(0, 'Amount cannot be negative')
+    .max(9_999_999, 'Amount is too large')
+    .refine((n) => Number.isFinite(n), 'Invalid amount'),
+  mode: paymentModeEnum.optional(),
+  note: trimmed.max(200).optional(),
 });
 
 export const deliverSchema = z.object({
@@ -166,6 +198,27 @@ export const stockInSchema = z.object({
   quantity: z.coerce.number().int().min(1, 'Quantity must be at least 1').max(1_000_000),
   reason: trimmed.max(200).optional().default('Stock received'),
   idempotencyKey: trimmed.max(80).optional().default(''),
+});
+
+/**
+ * A supplier list pasted in or uploaded as a text / sheet file. Each line has a
+ * part name and a quantity; the brand comes from a heading line above it. The
+ * app reads the list up front, so what arrives here is already clean rows.
+ */
+export const stockImportSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        name: trimmed.min(1, 'Item name is required').max(120),
+        brand: trimmed.max(60).default(''),
+        category: trimmed.max(60).default('Repair Part'),
+        quantity: z.coerce.number().int().min(0).max(1_000_000),
+      }),
+    )
+    .min(1, 'Nothing to import')
+    .max(500, 'Too many lines for one import'),
+  /** One key per file, so sending the same list twice cannot double the stock. */
+  idempotencyKey: trimmed.min(8).max(80).optional().default(''),
 });
 
 export const stockOutSchema = z

@@ -95,6 +95,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       headers: {
         ...(options.formData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-Device-Id': (() => {
+          try { return localStorage.getItem('jmr_device_id') || 'UNKNOWN'; } catch { return 'UNKNOWN'; }
+        })(),
+        'X-Device-Name': (() => {
+          try { return encodeURIComponent(localStorage.getItem('jmr_device_name') || 'Web Device'); } catch { return 'Web Device'; }
+        })(),
       },
       body: options.formData ? options.formData : options.body ? JSON.stringify(options.body) : undefined,
       signal: options.signal,

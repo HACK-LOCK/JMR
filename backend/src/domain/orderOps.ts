@@ -68,8 +68,9 @@ export function recalcOrder(draft: Database, order: RepairOrder): RepairOrder {
   order.paymentStatus = derivePaymentStatus(order);
 
   // Keep the "main" payment mode as the most recent one, it is what the
-  // customer actually paid with on the bill.
-  const latest = payments.at(-1);
+  // customer actually paid with on the bill. A 0 entry is skipped: no money
+  // changed hands, so it must not put a mode on a bill that was never paid.
+  const latest = payments.filter((payment) => round2(payment.amount) > 0).at(-1);
   if (latest) order.paymentMode = latest.mode;
   order.updatedAt = nowIso();
   return order;
@@ -95,6 +96,17 @@ export function addStatusHistory(
 /* Payments                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Records a payment the counter took.
+ *
+ * An amount of 0 is allowed. The counter needs to be able to say "nothing was
+ * taken" and have that written down — a walk-in that turned out to be a free
+ * fix, a job quoted but not paid for on delivery, or a free diagnostic check.
+ * Because 0 can never be overpaid, a 0 entry is accepted even when the bill has
+ * no outstanding balance, and it leaves the paid figure and balance untouched.
+ * Only a cancelled bill refuses payments, because its money is a refund to
+ * hand back rather than a payment to take.
+ */
 export function addPayment(
   draft: Database,
   input: {
@@ -110,8 +122,8 @@ export function addPayment(
   if (order.status === 'Cancelled') {
     throw new ConflictError('This order is cancelled. Payments are not allowed.');
   }
-  if (!Number.isFinite(input.amount) || input.amount <= 0) {
-    throw new ValidationError('Amount must be more than 0.');
+  if (!Number.isFinite(input.amount) || input.amount < 0) {
+    throw new ValidationError('Amount cannot be negative.');
   }
 
   if (input.idempotencyKey) {
@@ -124,13 +136,14 @@ export function addPayment(
   recalcOrder(draft, order);
   const payable = Math.max(0, round2(order.finalAmount - order.discount));
   const balance = Math.max(0, round2(payable - order.paidAmount));
-  if (balance <= 0) {
+  const amount = round2(input.amount);
+  if (amount > 0 && balance <= 0) {
     throw new ConflictError('This order is already fully paid.');
   }
-  if (round2(input.amount) > balance) {
+  if (amount > balance) {
     throw new ValidationError(`Amount is more than the balance of Rs.${balance}.`, [
       `Balance: ${balance}`,
-      `Entered: ${round2(input.amount)}`,
+      `Entered: ${amount}`,
     ]);
   }
 
@@ -138,7 +151,7 @@ export function addPayment(
   const payment: Payment = {
     id: newId('PAY'),
     orderId: order.id,
-    amount: round2(input.amount),
+    amount,
     mode: input.mode,
     status: 'Partially Paid',
     note: input.note.trim(),
@@ -152,6 +165,53 @@ export function addPayment(
   recalcOrder(draft, order);
   payment.status = order.paymentStatus;
   return { payment, order };
+}
+
+/**
+ * Corrects a payment the counter has already taken, changing the original row
+ * in place. There is deliberately no second row and no reversal: a mistyped
+ * amount is fixed, not offset, so the bill's paid figure, balance and payment
+ * status are the only record of the correction and the shop never appears to
+ * have taken more money than it did.
+ *
+ * The corrected total may not push the bill over what it can be paid, which
+ * keeps "Paid" meaning the same thing it meant before the edit.
+ */
+export function updatePayment(
+  draft: Database,
+  input: { orderId: string; paymentId: string; amount: number; mode?: string; note?: string },
+): { order: RepairOrder; payment: Payment } {
+  const order = findOrder(draft, input.orderId);
+  const payment = draft.payments.find(
+    (item) => item.id === input.paymentId && item.orderId === input.orderId,
+  );
+  if (!payment) throw new NotFoundError('Payment not found.');
+
+  if (!Number.isFinite(input.amount) || input.amount < 0) {
+    throw new ValidationError('Amount cannot be negative.');
+  }
+
+  const others = draft.payments
+    .filter((item) => item.orderId === input.orderId && item.id !== input.paymentId)
+    .reduce((sum, item) => sum + round2(item.amount), 0);
+  const payable = Math.max(0, round2(order.finalAmount - order.discount));
+  const newPaid = round2(others + round2(input.amount));
+  if (newPaid > payable) {
+    throw new ValidationError(
+      `That makes the bill over-paid. Rs.${payable} is the most this bill can take.`,
+      [`Payments would total: Rs.${newPaid}`, `Bill is payable: Rs.${payable}`],
+    );
+  }
+
+  const amount = round2(input.amount);
+  payment.amount = amount;
+  if (input.mode) payment.mode = input.mode as Payment['mode'];
+  if (input.note !== undefined) payment.note = input.note.trim();
+  payment.updatedAt = nowIso();
+
+  recalcOrder(draft, order);
+  payment.status = order.paymentStatus;
+  return { order, payment };
 }
 
 export function removePayment(

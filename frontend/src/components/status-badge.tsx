@@ -34,8 +34,33 @@ const PAYMENT_TONE: Record<PaymentStatus, 'success' | 'warning' | 'destructive'>
   Unpaid: 'destructive',
 };
 
-export function PaymentBadge({ status }: { status: string }): JSX.Element {
-  return <Badge variant={PAYMENT_TONE[status as PaymentStatus] ?? 'secondary'}>{status}</Badge>;
+/**
+ * A bill that has no amount on it yet is neither paid nor unpaid, it is simply
+ * not quoted. Showing a red "Unpaid" badge on a bill the shop has not finished
+ * pricing would cry wolf on every freshly created job, so a zero-amount bill
+ * gets a neutral "No Amount Yet" badge instead.
+ */
+export function PaymentBadge({
+  status,
+  payable,
+  size,
+}: {
+  status: string;
+  payable?: number;
+  size?: 'default' | 'lg';
+}): JSX.Element {
+  if (status === 'Unpaid' && payable !== undefined && payable <= 0) {
+    return (
+      <Badge variant="secondary" size={size}>
+        No Amount Yet
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant={PAYMENT_TONE[status as PaymentStatus] ?? 'secondary'} size={size}>
+      {status}
+    </Badge>
+  );
 }
 
 export function ConsumeBadge({ mode }: { mode: ConsumeMode }): JSX.Element {

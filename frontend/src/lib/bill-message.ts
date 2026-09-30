@@ -1,5 +1,5 @@
 import type { ShopSettings } from '@shared/domain';
-import { money, dateOnly, deviceLabel } from './format';
+import { dateOnly, deviceLabel } from './format';
 
 /** The bits of a bill a message needs. Works for list rows and full details. */
 export interface BillForMessage {
@@ -19,52 +19,45 @@ export interface BillForMessage {
 
 function shopLines(settings: ShopSettings): string[] {
   const lines: string[] = [];
-  if (settings.address) lines.push(settings.address);
+  if (settings.address.trim()) lines.push(`📍 ${settings.address.trim()}`);
   const numbers = [settings.contact1Number, settings.contact2Number]
     .map((number) => number.trim())
     .filter(Boolean);
-  if (numbers.length > 0) lines.push(`Phone: ${numbers.join(' / ')}`);
+  if (numbers.length > 0) lines.push(`📞 ${numbers.join(' | ')}`);
   return lines;
 }
 
+const divider = '━'.repeat(20);
+
 /**
- * The bill as plain text. Every name, number and address comes from the shop
- * settings on the server, so a message never carries an old shop name.
+ * The bill as a WhatsApp repair receipt. Every name, number and address comes
+ * from the shop settings on the server, so a message never carries an old shop
+ * name. Deliberately kept to what a customer needs on their phone: the shop,
+ * the receipt number and date, the customer name, and the device being repaired.
+ * No totals, no payment lines, no fine print - the counter confirms the amount
+ * face to face when the device is handed over.
  */
 export function billMessage(order: BillForMessage, settings: ShopSettings): string {
+  const shop = settings.shopName.trim();
   const device = deviceLabel(order.brand, order.model);
-  const lines: string[] = [
-    `*${settings.shopName}*`,
-    ...shopLines(settings),
+  const problem = order.complaint.trim();
+
+  const lines: string[] = [`🏪 *${shop.toUpperCase()}*`, ...shopLines(settings), divider];
+  lines.push('', '🧾 *REPAIR RECEIPT*', '', `*Receipt No.:* ${order.id}`);
+  lines.push(`*Received On:* ${dateOnly(order.receivedAt)}`);
+  lines.push('', '👤 *CUSTOMER*', `*Name:* ${order.customerName}`);
+  lines.push('', '📱 *DEVICE*', `*Model:* ${device}`);
+  if (problem) lines.push(`*Problem:* ${problem}`);
+  lines.push(
     '',
-    `Bill *${order.id}*`,
-    `Customer: ${order.customerName}`,
-    `Device: ${device}`,
-  ];
-  if (order.complaint) lines.push(`Problem: ${order.complaint}`);
-  lines.push(`Received: ${dateOnly(order.receivedAt)}`);
-  if (order.expectedDelivery) lines.push(`Expected: ${order.expectedDelivery}`);
-  lines.push(`Status: ${order.status}`);
-  lines.push('', `Total: ${money(order.finalAmount)}`);
-  if (order.discount > 0) lines.push(`Discount: -${money(order.discount)}`);
-  if (order.paidAmount > 0) lines.push(`Paid: ${money(order.paidAmount)}`);
-  if (order.balance > 0) {
-    lines.push(`*Balance due: ${money(order.balance)}*`);
-    if (settings.upiId) {
-      const upi = encodeURIComponent(
-        `upi://pay?pa=${encodeURIComponent(settings.upiId)}&pn=${encodeURIComponent(
-          settings.shopName,
-        )}&am=${encodeURIComponent(String(order.balance))}&cu=INR&tn=${encodeURIComponent(
-          `${settings.shopName} ${order.id}`,
-        )}`,
-      );
-      lines.push(`Pay by UPI: ${upi}`);
-    }
-  } else {
-    lines.push('*Paid in full. Thank you!*');
-  }
-  if (settings.receiptInformation) lines.push('', settings.receiptInformation);
-  if (settings.billFooter) lines.push(settings.billFooter);
+    divider,
+    'Thank you for choosing',
+    `*${shop}.*`,
+    '',
+    '*Keep this receipt number for reference:*',
+    `*${order.id}*`,
+    divider,
+  );
   return lines.join('\n');
 }
 

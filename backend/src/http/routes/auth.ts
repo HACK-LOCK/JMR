@@ -3,6 +3,7 @@ import type { AuthUser } from '../../../../shared/domain';
 import { env } from '../../config/env';
 import { userStore } from '../../data/userStore';
 import { safeEqual } from '../../core/id';
+import { deviceLogService } from '../../services/deviceLogs';
 import { AuthError, ForbiddenError, NotFoundError } from '../../core/errors';
 import { requireAuth, signToken } from '../middleware/auth';
 import { asyncRoute, sendData } from '../middleware/respond';
@@ -98,6 +99,15 @@ authRouter.post(
       username: user.username,
       role: user.role,
     };
+    const devId = (req.headers['x-device-id'] as string) || 'UNKNOWN';
+    const rawDevName = (req.headers['x-device-name'] as string) || 'Web Device';
+    void deviceLogService.recordLog({
+      devId,
+      devName: decodeURIComponent(rawDevName),
+      user: authUser.username,
+      action: 'LOGIN',
+      tag: 'Session Login',
+    });
     sendData(res, { token: signToken(authUser), user: authUser });
   }),
 );

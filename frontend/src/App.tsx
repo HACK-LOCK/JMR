@@ -125,6 +125,8 @@ export default function App(): JSX.Element {
 
           {/* JMR - STOCK */}
           <Route path="/stock" element={<StockDesktop />} />
+          <Route path="/stock/import" element={<StockDesktop mode="import" />} />
+          <Route path="/stock/settings" element={<StockDesktop mode="settings" />} />
           <Route path="/parts/:id" element={<PartDetailPage />} />
 
           {/* Old links keep working and land on the right new screen. */}
@@ -136,7 +138,7 @@ export default function App(): JSX.Element {
           <Route path="/stock/out" element={<Navigate to="/stock?tab=out" replace />} />
           <Route path="/suppliers" element={<Navigate to="/stock?tab=suppliers" replace />} />
           <Route path="/sync" element={<Navigate to="/stock?tab=sync" replace />} />
-          <Route path="/settings" element={<Navigate to="/stock?tab=settings" replace />} />
+          <Route path="/settings" element={<Navigate to="/stock/settings" replace />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

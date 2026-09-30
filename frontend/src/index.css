@@ -120,6 +120,48 @@
   .safe-top {
     padding-top: env(safe-area-inset-top, 0px);
   }
+
+  /*
+   * The stock items table folds itself to the screen: three real columns on a
+   * tablet or desktop, one labelled card per row on a phone. The row labels
+   * come from each cell's data-col attribute, so there is no second copy of the
+   * markup to keep in step with the columns. Everything above a phone just
+   * shows the plain table.
+   */
+  .stock-items-table thead th {
+    @apply whitespace-nowrap px-3 py-2 text-2xs font-bold uppercase tracking-wider text-muted-foreground;
+    background-color: hsl(var(--muted) / 0.4);
+  }
+
+  @media (max-width: 767px) {
+    .stock-items-table thead {
+      display: none;
+    }
+    .stock-items-table tbody,
+    .stock-items-table tbody tr {
+      display: block;
+    }
+    .stock-items-table tbody td {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      border-top: 1px solid hsl(var(--border));
+    }
+    .stock-items-table tbody tr:first-child td:first-child,
+    .stock-items-table tbody td:first-child {
+      border-top: 0;
+    }
+    .stock-items-table tbody td::before {
+      content: attr(data-col);
+      flex-shrink: 0;
+      font-size: 0.625rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: hsl(var(--muted-foreground));
+    }
+  }
 }
 
 @layer utilities {

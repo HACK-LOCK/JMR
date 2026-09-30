@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { partsService } from '../../services';
+import { exportsService, partsService } from '../../services';
 import { actorName, requireAuth } from '../middleware/auth';
 import { asyncRoute, param, sendData } from '../middleware/respond';
 import {
   partCreateSchema,
   partUpdateSchema,
   stockAdjustSchema,
+  stockImportSchema,
   stockInSchema,
   stockOutSchema,
 } from '../../validation/schemas';
@@ -34,10 +35,46 @@ partsRouter.post(
   }),
 );
 
+partsRouter.post(
+  '/parts/import',
+  asyncRoute(async (req, res) => {
+    const input = stockImportSchema.parse(req.body);
+    const result = await partsService.importParts(input, actorName(req));
+    res.status(201);
+    sendData(res, result.data, result.warning);
+  }),
+);
+
 partsRouter.get(
   '/parts/summary',
   asyncRoute(async (_req, res) => {
     sendData(res, partsService.stockSummary());
+  }),
+);
+
+partsRouter.get(
+  '/parts/low-stock.xlsx',
+  asyncRoute(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const brand = typeof req.query.brand === 'string' ? req.query.brand : undefined;
+    const categories =
+      typeof req.query.categories === 'string'
+        ? req.query.categories.split(',').filter(Boolean)
+        : undefined;
+    const level =
+      req.query.level === 'zero' || req.query.level === 'one' || req.query.level === 'all'
+        ? req.query.level
+        : undefined;
+    const ids =
+      typeof req.query.ids === 'string' ? req.query.ids.split(',').filter(Boolean) : undefined;
+
+    const file = exportsService.exportLowStockParts({ q, brand, categories, level, ids });
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.buffer);
   }),
 );
 

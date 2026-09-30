@@ -1,6 +1,7 @@
 import {
   balanceAmount,
   customerExportColumns,
+  isLowStock,
   payableAmount,
   round2,
   type CustomerExportColumn,
@@ -412,4 +413,139 @@ export async function exportCustomersPdf(
   });
   return { filename: customersFilename('pdf'), buffer };
 }
+
+export interface LowStockExportInput {
+  q?: string;
+  brand?: string;
+  categories?: string[];
+  level?: 'all' | 'zero' | 'one';
+  ids?: string[];
+}
+
+export function exportLowStockParts(input: LowStockExportInput = {}): { filename: string; buffer: Buffer } {
+  const db = read();
+  const q = (input.q ?? '').trim().toLowerCase();
+  const brand = (input.brand ?? '').trim().toLowerCase();
+  const categorySet =
+    input.categories && input.categories.length > 0
+      ? new Set(input.categories.map((c) => c.trim().toLowerCase()))
+      : null;
+  const idSet = input.ids && input.ids.length > 0 ? new Set(input.ids) : null;
+
+  let parts = db.parts.filter((part) => part.active && isLowStock(part));
+
+  if (input.level === 'zero') {
+    parts = parts.filter((part) => part.quantity <= 0);
+  } else if (input.level === 'one') {
+    parts = parts.filter((part) => part.quantity <= 1);
+  }
+
+  if (brand && brand !== 'all') {
+    parts = parts.filter((part) => part.brand.toLowerCase() === brand);
+  }
+
+  if (categorySet && categorySet.size > 0) {
+    parts = parts.filter((part) => categorySet.has((part.category || '').toLowerCase()));
+  }
+
+  if (idSet && idSet.size > 0) {
+    parts = parts.filter((part) => idSet.has(part.id));
+  }
+
+  if (q) {
+    parts = parts.filter(
+      (part) =>
+        part.name.toLowerCase().includes(q) ||
+        part.brand.toLowerCase().includes(q) ||
+        part.model.toLowerCase().includes(q) ||
+        (part.category || '').toLowerCase().includes(q),
+    );
+  }
+
+  if (parts.length === 0) {
+    throw new NotFoundError('No low stock items found matching the selected filter.');
+  }
+
+  // Parts with quantity < 2 appear at the very top (0 first, then 1)
+  parts.sort((a, b) => {
+    const aCrit = a.quantity < 2 ? 0 : 1;
+    const bCrit = b.quantity < 2 ? 0 : 1;
+    if (aCrit !== bCrit) return aCrit - bCrit;
+    if (a.quantity !== b.quantity) return a.quantity - b.quantity;
+    return a.name.localeCompare(b.name);
+  });
+
+  const columns: XlsxColumn[] = [
+    { header: 'Item Name', width: 32 },
+    { header: 'Brand', width: 16 },
+    { header: 'Model', width: 16 },
+    { header: 'Category', width: 20 },
+    { header: 'Available Qty', width: 14 },
+    { header: 'Min Qty', width: 12 },
+    { header: 'Order Qty', width: 14 },
+    { header: 'Cost (₹)', width: 14, money: true },
+    { header: 'Supplier', width: 22 },
+  ];
+
+  const rows = parts.map((part) => {
+    const orderQty = Math.max(1, Math.max(part.minQuantity, 2) - part.quantity);
+    return [
+      part.name,
+      part.brand,
+      part.model,
+      part.category || '-',
+      part.quantity,
+      part.minQuantity,
+      orderQty,
+      part.purchaseCost,
+      part.supplierName || '-',
+    ];
+  });
+
+  const outOfStockCount = parts.filter((p) => p.quantity <= 0).length;
+  const criticalCount = parts.filter((p) => p.quantity === 1).length;
+  const totalOrderUnits = parts.reduce(
+    (sum, p) => sum + Math.max(1, Math.max(p.minQuantity, 2) - partOrderQty(p)),
+    0,
+  );
+  const estimatedCost = round2(
+    parts.reduce(
+      (sum, p) => sum + Math.max(1, Math.max(p.minQuantity, 2) - p.quantity) * p.purchaseCost,
+      0,
+    ),
+  );
+
+  const buffer = buildWorkbook([
+    {
+      name: 'Order List',
+      columns,
+      rows,
+    },
+    {
+      name: 'Summary',
+      totalsRow: true,
+      columns: [
+        { header: 'Metric', width: 28 },
+        { header: 'Value', width: 18 },
+      ],
+      rows: [
+        ['Total Items to Order', parts.length],
+        ['Out of Stock Items (0 Qty)', outOfStockCount],
+        ['Critical Items (1 Qty)', criticalCount],
+        ['Total Units Needed', totalOrderUnits],
+        ['Estimated Order Cost', estimatedCost],
+        ['Exported On', shopDateString()],
+      ],
+    },
+  ]);
+
+  const dateStr = shopDateString();
+  const filename = `JMR-Low-Stock-Order-List-${dateStr}.xlsx`;
+  return { filename, buffer };
+}
+
+function partOrderQty(p: { minQuantity: number; quantity: number }): number {
+  return p.quantity;
+}
+
 

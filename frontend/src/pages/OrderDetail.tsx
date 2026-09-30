@@ -1,21 +1,25 @@
-import { useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Banknote,
   CheckCircle2,
-  Clock,
+  ChevronLeft,
   CloudUpload,
   ExternalLink,
   FileText,
   History,
   Package,
+  PackageCheck,
   Pencil,
   Phone,
   Plus,
   Printer,
+  Smartphone,
   Trash2,
   Truck,
   Wallet,
+  Wrench,
+  XCircle,
 } from 'lucide-react';
 import {
   COUNTER_STATUSES,
@@ -25,16 +29,14 @@ import {
   type OrderStatus,
   round2,
 } from '@shared/domain';
-import { PageHeader } from '@/components/app-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Textarea, numberPad } from '@/components/ui/input';
 import { Field } from '@/components/ui/label';
   import { Select } from '@/components/ui/select';
-  import { ProblemField } from '@/components/problem-field';
-  import { BrandField, ModelField } from '@/components/device-fields';
-import { DetailRow } from '@/components/ui/table';
+import { ProblemField } from '@/components/problem-field';
+import { BrandField, ModelField } from '@/components/device-fields';
 import { ErrorBlock, InlineNotice, LoadingBlock } from '@/components/ui/feedback';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
@@ -51,6 +53,7 @@ import {
   useParts,
   useRecordPayment,
   useUpdateOrder,
+  useUpdatePayment,
 } from '@/hooks/use-queries';
 import { useDebounced } from '@/lib/hooks';
 import { dateOnly, dateTime, deviceLabel, money } from '@/lib/format';
@@ -60,15 +63,15 @@ import { cn } from '@/lib/utils';
 export default function OrderDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
   const toast = useToast();
   const { data: order, isLoading, error, refetch } = useOrder(id);
 
-  const [statusOpen, setStatusOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [totalOpen, setTotalOpen] = useState(false);
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [partOpen, setPartOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(params.get('new') === '1');
+  const [editOpen, setEditOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const changeStatus = useChangeStatus(id ?? '');
   const deliver = useDeliverOrder(id ?? '');
@@ -76,6 +79,7 @@ export default function OrderDetail(): JSX.Element {
   const deletePart = useDeleteOrderPart(id ?? '');
   const removePayment = useDeletePayment(id ?? '');
   const recordPayment = useRecordPayment(id ?? '');
+  const updatePayment = useUpdatePayment(id ?? '');
   const update = useUpdateOrder(id ?? '');
 
   if (isLoading && !order) return <LoadingBlock label="Loading bill..." />;
@@ -91,16 +95,15 @@ export default function OrderDetail(): JSX.Element {
 
   const closed = order.status === 'Delivered' || order.status === 'Cancelled' || order.status === 'Unable to Repair';
   const cancelled = order.status === 'Cancelled';
+  // What the parts fitted to this job add up to. The server will not let the
+  // bill be priced under it, so the total sheet needs it to say so up front.
+  const partsTotal = round2(
+    order.parts.reduce((sum, line) => sum + round2(line.quantity * line.unitPrice), 0),
+  );
 
   const pickStatus = async (status: OrderStatus): Promise<void> => {
-    if (status === 'Delivered') {
-      setStatusOpen(false);
-      setDeliverOpen(true);
-      return;
-    }
     try {
       const response = await changeStatus.mutateAsync(status);
-      setStatusOpen(false);
       if (response.warning) toast.warning(response.warning.message);
       else toast.success(`Marked as ${status}`);
     } catch (caught) {
@@ -110,12 +113,56 @@ export default function OrderDetail(): JSX.Element {
 
   return (
     <div className="space-y-4 pb-4">
-      <PageHeader
-        title={order.customerName}
-        subtitle={`${order.id} - ${deviceLabel(order.brand, order.model, order.deviceType)}`}
-        back
-        action={<StatusBadge status={order.status} size="lg" />}
-      />
+      {/* Top action row: Back arrow on the left, Call + WhatsApp + Status on the right */}
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Go back"
+          onClick={() => navigate(-1)}
+          className="h-10 w-10 shrink-0 rounded-xl"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <ContactActions order={order} size="sm" iconOnly />
+          <StatusBadge status={order.status} size="lg" />
+        </div>
+      </div>
+
+      {/* Bill information: Structured customer name, order ID, device name and details */}
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h1 className="text-xl font-black leading-tight tracking-tight text-foreground sm:text-2xl">
+            {order.customerName}
+          </h1>
+          <span className="tabular rounded-md bg-primary/10 px-2.5 py-0.5 font-mono text-xs font-black tracking-wide text-primary">
+            {order.id}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-2.5 py-1 font-semibold text-secondary-foreground">
+            <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+            {deviceLabel(order.brand, order.model, order.deviceType)}
+          </span>
+          {order.mobile ? (
+            <a
+              href={`tel:${order.mobile}`}
+              className="tabular inline-flex items-center gap-1 rounded-md bg-secondary px-2.5 py-1 font-semibold text-secondary-foreground hover:text-primary transition-colors"
+            >
+              <Phone className="h-3 w-3 text-muted-foreground" />
+              {order.mobile}
+            </a>
+          ) : null}
+          {order.complaint ? (
+            <span className="inline-flex items-center rounded-md bg-muted/70 px-2.5 py-1 text-muted-foreground line-clamp-1 max-w-[260px]">
+              {order.complaint}
+            </span>
+          ) : null}
+        </div>
+      </div>
 
       {order.pendingSync ? (
         <InlineNotice tone="warning">
@@ -124,25 +171,38 @@ export default function OrderDetail(): JSX.Element {
         </InlineNotice>
       ) : null}
 
-      <ContactActions order={order} size="md" />
-
-      {/* Money summary. A cancelled bill keeps what was paid on it, so the third
-          figure is the money going back rather than a balance still to collect -
-          the server refuses payments on a cancelled bill, so offering to take
-          one would be a button that always fails. */}
+      {/* Money summary. These three figures are how the money on a bill is
+          changed: tap the total to re-price the job, tap what was paid to take
+          or correct a payment. They are the numbers the counter is already
+          looking at, so they are the buttons - a separate row of money buttons
+          would be one more place for the same figure to be edited from, and the
+          two would drift apart.
+          A cancelled bill keeps what was paid on it, so the last figure is the
+          money going back rather than a balance still to collect - the server
+          refuses payments on a cancelled bill, so offering to take one would be
+          a button that always fails. */}
       <Card>
         <CardContent className="space-y-2 pt-4">
           <div className="grid grid-cols-3 gap-2 text-center">
-            <MoneyCell label="Total" value={money(order.finalAmount)} />
+            <MoneyCell
+              label="Total"
+              value={money(order.finalAmount)}
+              actionLabel={closed ? undefined : 'Change total'}
+              onClick={closed ? undefined : () => setTotalOpen(true)}
+            />
             <MoneyCell
               label={cancelled ? 'Received' : 'Paid'}
               value={money(order.paidAmount)}
               tone="success"
+              actionLabel={cancelled ? undefined : 'Take or change'}
+              onClick={cancelled ? undefined : () => setPaymentOpen(true)}
             />
             <MoneyCell
               label={cancelled ? 'To return' : 'Balance'}
               value={money(cancelled ? order.paidAmount : order.balance)}
               tone={cancelled ? 'destructive' : order.balance > 0 ? 'destructive' : 'success'}
+              actionLabel={cancelled || order.balance <= 0 ? undefined : 'Collect'}
+              onClick={cancelled || order.balance <= 0 ? undefined : () => setPaymentOpen(true)}
             />
           </div>
           {order.discount > 0 ? (
@@ -154,7 +214,7 @@ export default function OrderDetail(): JSX.Element {
             {cancelled ? (
               <Badge variant="destructive">Return {money(order.paidAmount)} to customer</Badge>
             ) : (
-              <PaymentBadge status={order.paymentStatus} />
+              <PaymentBadge status={order.paymentStatus} payable={order.payable} />
             )}
             {order.paymentMode && order.paidAmount > 0 ? (
               <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
@@ -165,21 +225,56 @@ export default function OrderDetail(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Primary actions */}
+      {/* Primary actions. The whole life of the job sits together here, under
+          the header: adding what the repair needs, handing the device back, and
+          the statuses the counter sets. Money is not here - it is the three
+          figures at the top of the bill, so the figure and the way to change it
+          are never in different parts of the screen. Handing the device over is
+          the existing Give Device button, kept exactly as it was, so it still
+          asks who took it and still refuses to deliver while money is due. */}
       {!closed ? (
         <div className="grid grid-cols-2 gap-2.5">
-          <Button size="lg" className="gap-2" onClick={() => setStatusOpen(true)}>
-            <Clock className="h-5 w-5" /> Change Status
+          <Button size="lg" variant="outline" className="gap-2" onClick={() => setPartOpen(true)}>
+            <Plus className="h-5 w-5" /> Add Part
           </Button>
           <Button
             size="lg"
-            variant={order.balance > 0 ? 'destructive' : 'success'}
+            variant={order.balance > 0 ? 'outline' : 'success'}
             className="gap-2"
-            onClick={() => (order.balance > 0 ? setPaymentOpen(true) : setDeliverOpen(true))}
+            onClick={() => setDeliverOpen(true)}
           >
-            {order.balance > 0 ? <Wallet className="h-5 w-5" /> : <Truck className="h-5 w-5" />}
-            {order.balance > 0 ? 'Take Payment' : 'Give Device'}
+            <Truck className="h-5 w-5" /> Give Device
           </Button>
+          {COUNTER_STATUSES.filter((status) => status !== 'Delivered').map((status) => {
+            const isCurrent = status === order.status;
+            return (
+              <Button
+                key={status}
+                size="lg"
+                variant={isCurrent ? 'secondary' : 'outline'}
+                disabled={isCurrent || changeStatus.isPending}
+                className="gap-2"
+                onClick={() => {
+                  if (status === 'Cancelled') {
+                    setCancelOpen(true);
+                  } else {
+                    void pickStatus(status);
+                  }
+                }}
+              >
+                {status === 'Cancelled' ? (
+                  <XCircle className="h-5 w-5" />
+                ) : status === 'Ready' ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : status === 'Repairing' ? (
+                  <Wrench className="h-5 w-5" />
+                ) : (
+                  <PackageCheck className="h-5 w-5" />
+                )}
+                {status}
+              </Button>
+            );
+          })}
         </div>
       ) : (
         <InlineNotice tone={cancelled ? 'warning' : order.status === 'Delivered' ? 'success' : 'info'}>
@@ -192,16 +287,13 @@ export default function OrderDetail(): JSX.Element {
       )}
 
       {closed ? (
-        <div className="grid grid-cols-2 gap-2.5">
-          <Button variant="outline" className="gap-2" onClick={() => openProtectedFile(`/orders/${order.id}/bill.pdf`)}>
-            <Printer className="h-5 w-5" /> Print Bill
-          </Button>
-          {cancelled ? null : order.balance > 0 ? (
-            <Button className="gap-2" onClick={() => setPaymentOpen(true)}>
-              <Wallet className="h-5 w-5" /> Collect Due
-            </Button>
-          ) : null}
-        </div>
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          onClick={() => openProtectedFile(`/orders/${order.id}/bill.pdf`)}
+        >
+          <Printer className="h-5 w-5" /> Print Bill
+        </Button>
       ) : null}
 
       {/* Customer & device */}
@@ -216,42 +308,44 @@ export default function OrderDetail(): JSX.Element {
             ) : null}
           </div>
         </CardHeader>
-        <CardContent className="space-y-1">
-          <DetailRow
-            label="Customer"
-            value={
-              <button
-                type="button"
-                onClick={() => navigate(`/customers/${order.customerId}`)}
-                className="font-bold text-primary underline-offset-2 hover:underline"
-              >
-                {order.customerName}
-              </button>
-            }
-          />
-          <DetailRow
-            label="Mobile"
-            value={
-              <a
-                href={`tel:${order.mobile}`}
-                className="tabular inline-flex items-center gap-1.5 font-bold text-primary underline-offset-2 hover:underline"
-              >
-                <Phone className="h-4 w-4" /> {order.mobile}
-              </a>
-            }
-          />
-          <DetailRow label="Device" value={deviceLabel(order.brand, order.model, order.deviceType)} />
-          <DetailRow label="Type" value={order.deviceType} />
-          <DetailRow label="Condition" value={order.deviceCondition} />
-          {order.imei ? <DetailRow label="IMEI" value={<span className="tabular">{order.imei}</span>} /> : null}
-          {order.accessories ? <DetailRow label="Accessories" value={order.accessories} /> : null}
-          <DetailRow label="Problem" value={<span className="text-left">{order.complaint}</span>} />
-          {order.technician ? <DetailRow label="Technician" value={order.technician} /> : null}
-          {order.expectedDelivery ? (
-            <DetailRow label="Expected" value={dateOnly(order.expectedDelivery)} />
-          ) : null}
-          <DetailRow label="Received" value={dateTime(order.receivedAt)} />
-          {order.notes ? <DetailRow label="Notes" value={<span className="text-left">{order.notes}</span>} /> : null}
+        <CardContent className="p-0">
+          <div className="divide-y divide-border overflow-hidden rounded-xl border-2 border-border">
+            <DeviceField
+              label="Customer"
+              value={
+                <button
+                  type="button"
+                  onClick={() => navigate(`/customers/${order.customerId}`)}
+                  className="font-bold text-primary underline-offset-2 hover:underline"
+                >
+                  {order.customerName}
+                </button>
+              }
+            />
+            <DeviceField
+              label="Mobile"
+              value={
+                <a
+                  href={`tel:${order.mobile}`}
+                  className="tabular inline-flex items-center gap-1.5 font-bold text-primary underline-offset-2 hover:underline"
+                >
+                  <Phone className="h-3.5 w-3.5" /> {order.mobile}
+                </a>
+              }
+            />
+            <DeviceField label="Device" value={deviceLabel(order.brand, order.model, order.deviceType)} />
+            <DeviceField label="Type" value={order.deviceType} />
+            <DeviceField label="Condition" value={order.deviceCondition} />
+            {order.imei ? <DeviceField label="IMEI" value={<span className="tabular">{order.imei}</span>} /> : null}
+            {order.accessories ? <DeviceField label="Accessories" value={order.accessories} /> : null}
+            <DeviceField label="Problem" value={order.complaint} />
+            {order.technician ? <DeviceField label="Technician" value={order.technician} /> : null}
+            {order.expectedDelivery ? (
+              <DeviceField label="Expected" value={dateOnly(order.expectedDelivery)} />
+            ) : null}
+            <DeviceField label="Received" value={dateTime(order.receivedAt)} />
+            {order.notes ? <DeviceField label="Notes" value={order.notes} /> : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -265,11 +359,6 @@ export default function OrderDetail(): JSX.Element {
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5 text-primary" /> Items on this bill
             </CardTitle>
-            {!closed ? (
-              <Button variant="outline" size="sm" onClick={() => setPartOpen(true)} className="gap-1.5">
-                <Plus className="h-4 w-4" /> Add
-              </Button>
-            ) : null}
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -322,7 +411,7 @@ export default function OrderDetail(): JSX.Element {
             <CardTitle className="flex items-center gap-2">
               <Banknote className="h-5 w-5 text-success" /> Payments
             </CardTitle>
-            {order.paidAmount > 0 || order.finalAmount > 0 ? (
+            {!cancelled && (order.paidAmount > 0 || order.finalAmount > 0) ? (
               <Button variant="outline" size="sm" onClick={() => setPaymentOpen(true)} className="gap-1.5">
                 <Wallet className="h-4 w-4" /> {order.balance > 0 ? 'Take payment' : 'Add payment'}
               </Button>
@@ -426,48 +515,38 @@ export default function OrderDetail(): JSX.Element {
       </Card>
 
       {/* Dialogs */}
-      <Sheet
-        open={statusOpen}
-        onOpenChange={setStatusOpen}
-        title="Change bill status"
-        description={`Currently ${order.status}. Cancelling only marks the bill - it keeps its parts, its payments and its history, and nothing goes back to stock.`}
-      >
-        <div className="space-y-2 pb-2">
-          {COUNTER_STATUSES.map((status) => {
-            const isCurrent = status === order.status;
-            return (
-              <button
-                key={status}
-                type="button"
-                disabled={isCurrent || changeStatus.isPending}
-                onClick={() => void pickStatus(status)}
-                className={cn(
-                  'flex min-h-[56px] w-full items-center justify-between gap-2 rounded-xl border-2 px-4 text-left text-base font-semibold transition-colors',
-                  isCurrent
-                    ? 'cursor-default border-primary bg-primary/5 text-primary'
-                    : 'border-border hover:bg-secondary',
-                  status === 'Delivered' && 'border-success bg-success/5 text-success',
-                  status === 'Cancelled' && 'border-destructive bg-destructive/5 text-destructive',
-                )}
-              >
-                {status}
-                {isCurrent ? <CheckCircle2 className="h-5 w-5" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      </Sheet>
-
       <PaymentSheet
         open={paymentOpen}
         onOpenChange={setPaymentOpen}
         balance={order.balance}
-        busy={recordPayment.isPending}
+        payments={order.payments}
+        busy={recordPayment.isPending || updatePayment.isPending}
         onSubmit={async (body) => {
           const response = await recordPayment.mutateAsync(body);
           if (response.warning) toast.warning(response.warning.message);
           else toast.success('Payment recorded', money(body.amount));
           setPaymentOpen(false);
+        }}
+        onModifySubmit={async (body) => {
+          const response = await updatePayment.mutateAsync(body);
+          if (response.warning) toast.warning(response.warning.message);
+          else toast.success('Payment corrected', `${money(body.amount)} is now on the bill.`);
+        }}
+      />
+
+      <TotalSheet
+        open={totalOpen}
+        onOpenChange={setTotalOpen}
+        finalAmount={order.finalAmount}
+        discount={order.discount}
+        paidAmount={order.paidAmount}
+        partsTotal={partsTotal}
+        busy={update.isPending}
+        onSave={async (body) => {
+          const response = await update.mutateAsync(body);
+          if (response.warning) toast.warning(response.warning.message);
+          else toast.success('Total changed', `The bill is now ${money(order.finalAmount)}.`);
+          setTotalOpen(false);
         }}
       />
 
@@ -480,6 +559,22 @@ export default function OrderDetail(): JSX.Element {
           if (order.balance > 0) {
             toast.error('Payment still due', `Collect ${money(order.balance)} before giving the device.`);
             return;
+          }
+          // The server will not hand back a device that is still marked as
+          // being worked on. That guard is worth keeping - a bill can be
+          // genuinely unfinished - but the counter is not making a mistake
+          // by handing the device over, so the status is corrected here
+          // instead of making them tap Ready and then Give Device again.
+          if (order.status !== 'Ready' && order.status !== 'Unable to Repair') {
+            try {
+              await changeStatus.mutateAsync('Ready');
+            } catch (caught) {
+              toast.error(
+                'Could not mark the bill Ready',
+                caught instanceof Error ? caught.message : undefined,
+              );
+              return;
+            }
           }
           const response = await deliver.mutateAsync(deliveredTo);
           if (response.warning) toast.warning(response.warning.message);
@@ -507,12 +602,24 @@ export default function OrderDetail(): JSX.Element {
         open={partOpen}
         onOpenChange={setPartOpen}
         excludeIds={order.parts.map((line) => line.partId)}
+        busy={addPart.isPending}
         onPick={(part) => {
           void addPart
-            .mutateAsync({ partId: part.id, quantity: 1, unitPrice: part.sellingPrice })
+            .mutateAsync({ partId: part.id, name: part.name, quantity: 1, unitPrice: part.sellingPrice })
             .then((response) => {
               if (response.warning) toast.warning(response.warning.message);
               else toast.success(`${part.name} added to the bill`);
+            })
+            .catch((caught: unknown) =>
+              toast.error('Could not add the item', caught instanceof Error ? caught.message : undefined),
+            );
+        }}
+        onAddTyped={(input) => {
+          void addPart
+            .mutateAsync({ partId: '', ...input })
+            .then((response) => {
+              if (response.warning) toast.warning(response.warning.message);
+              else toast.success(`${input.name} added to the bill`);
             })
             .catch((caught: unknown) =>
               toast.error('Could not add the item', caught instanceof Error ? caught.message : undefined),
@@ -532,28 +639,74 @@ export default function OrderDetail(): JSX.Element {
           setEditOpen(false);
         }}
       />
+
+      <CancelOrderSheet
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        order={order}
+        busy={changeStatus.isPending}
+        onConfirm={async (reason) => {
+          try {
+            const response = await changeStatus.mutateAsync('Cancelled');
+            if (response.warning) toast.warning(response.warning.message);
+            else toast.success('Bill cancelled', `Marked as Cancelled (${reason})`);
+            setCancelOpen(false);
+          } catch (caught) {
+            toast.error('Could not cancel bill', caught instanceof Error ? caught.message : undefined);
+          }
+        }}
+      />
     </div>
   );
 }
 
+/**
+ * One row of the compact device table on the bill: every name sits flush on the
+ * left, every value lines up on the right edge, so the two columns read cleanly.
+ * Thin padding keeps the whole card small.
+ */
+function DeviceField({ label, value }: { label: string; value: React.ReactNode }): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-3 py-1">
+      <span className="shrink-0 text-2xs font-bold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-right text-sm font-semibold text-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One of the three figures at the top of the bill. Where the number can be
+ * changed, the whole cell is the button - a counter should be able to reach the
+ * number they want to fix by touching the number itself, not by hunting for a
+ * separate control that happens to be next to it.
+ */
 function MoneyCell({
   label,
   value,
   tone = 'default',
+  actionLabel,
+  onClick,
 }: {
   label: string;
   value: string;
   tone?: 'default' | 'success' | 'destructive';
+  actionLabel?: string;
+  onClick?: () => void;
 }): JSX.Element {
-  return (
-    <div
-      className={cn(
-        'rounded-xl p-3',
-        tone === 'success' && 'bg-success/10',
-        tone === 'destructive' && 'bg-destructive/10',
-        tone === 'default' && 'bg-secondary',
-      )}
-    >
+  const tones = cn(
+    'relative rounded-xl p-3 text-left transition-colors',
+    tone === 'success' && 'bg-success/10',
+    tone === 'destructive' && 'bg-destructive/10',
+    tone === 'default' && 'bg-secondary',
+    onClick && 'cursor-pointer hover:brightness-95 active:brightness-90',
+  );
+
+  const body = (
+    <>
       <p className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
       <p
         className={cn(
@@ -564,7 +717,19 @@ function MoneyCell({
       >
         {value}
       </p>
-    </div>
+      {actionLabel ? (
+        <p className="mt-1 flex items-center gap-1 text-2xs font-bold text-muted-foreground">
+          <Pencil className="h-3 w-3" /> {actionLabel}
+        </p>
+      ) : null}
+    </>
+  );
+
+  if (!onClick) return <div className={tones}>{body}</div>;
+  return (
+    <button type="button" onClick={onClick} aria-label={`${label} ${value}. ${actionLabel ?? ''}`} className={tones}>
+      {body}
+    </button>
   );
 }
 
@@ -630,36 +795,65 @@ function BillActions({ orderId, hasDrive }: { orderId: string; hasDrive: boolean
   );
 }
 
+type BillPayment = { id: string; amount: number; mode: string; note: string; date: string };
+
+/**
+ * One sheet for all money at the counter. The counter usually comes here to take
+ * a payment, but a mistyped amount is corrected in the same place - it is the
+ * same screen, not a second dialog, because it is the same job. Correcting
+ * changes that one payment: no adjustment row, no second payment, so the bill's
+ * paid figure, balance and payment status are the only record and the shop never
+ * looks like it took the same money twice.
+ */
 function PaymentSheet({
   open,
   onOpenChange,
   balance,
+  payments,
   busy,
   onSubmit,
+  onModifySubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   balance: number;
+  payments: BillPayment[];
   busy: boolean;
   onSubmit: (body: { amount: number; mode: string; note: string; idempotencyKey: string }) => Promise<void>;
+  onModifySubmit: (body: { paymentId: string; amount: number; mode: string; note: string }) => Promise<void>;
 }): JSX.Element {
   const toast = useToast();
+  const [view, setView] = useState<'take' | 'modify'>('take');
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState('Cash');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [selectedId, setSelectedId] = useState('');
 
-  const value = Number(amount) || 0;
+  const selected = payments.find((payment) => payment.id === selectedId);
+
+  const choose = (payment: BillPayment): void => {
+    setSelectedId(payment.id);
+    setAmount(String(payment.amount));
+    setMode(payment.mode);
+    setNote(payment.note);
+  };
+
+  const value = Number(amount);
+  const takeValue = Number(amount) || 0;
+  const unchanged = selected ? round2(value) === round2(selected.amount) : false;
 
   const submit = async (): Promise<void> => {
-    if (value <= 0) {
+    // An empty box is a mistake, but a typed 0 is a real answer: sometimes
+    // nothing is collected. Both are allowed as long as something was typed.
+    if (amount.trim() === '' || !(Number.isFinite(value) && value >= 0)) {
       toast.error('Enter the amount received');
       return;
     }
     setSaving(true);
     try {
-      await onSubmit({ amount: round2(value), mode, note: note.trim(), idempotencyKey });
+      await onSubmit({ amount: round2(takeValue), mode, note: note.trim(), idempotencyKey });
       setAmount('');
       setNote('');
       setIdempotencyKey(crypto.randomUUID());
@@ -670,10 +864,126 @@ function PaymentSheet({
     }
   };
 
+  const saveCorrection = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!selected) return;
+    if (amount.trim() === '' || !(Number.isFinite(value) && value >= 0)) {
+      toast.error('Enter the amount that was actually received');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onModifySubmit({ paymentId: selected.id, amount: round2(value), mode, note: note.trim() });
+      // Stay open and go back to taking a payment. A counter who just corrected
+      // one amount usually still has the rest of the balance to collect, and
+      // making them close and reopen the sheet to do it is a miscount waiting
+      // to happen.
+      setView('take');
+      setAmount('');
+      setNote('');
+      setSelectedId('');
+    } catch (caught) {
+      toast.error('Could not change the payment', caught instanceof Error ? caught.message : undefined);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Start clean every time, so a correction never inherits the last amount typed.
+  const handleOpenChange = (next: boolean): void => {
+    if (!next) {
+      setView('take');
+      setAmount('');
+      setNote('');
+      setSelectedId('');
+    }
+    onOpenChange(next);
+  };
+
+  if (view === 'modify') {
+    return (
+      <Sheet
+        open={open}
+        onOpenChange={handleOpenChange}
+        title="Modify a payment"
+        description="Fix the amount on a payment already received. Nothing extra is added to the bill."
+      >
+        <div className="space-y-3 pb-2">
+          <ul className="space-y-2">
+            {payments.map((payment) => (
+              <li key={payment.id}>
+                <button
+                  type="button"
+                  onClick={() => choose(payment)}
+                  className={cn(
+                    'flex min-h-[56px] w-full items-center justify-between gap-3 rounded-xl border-2 px-3 text-left',
+                    selectedId === payment.id ? 'border-primary bg-primary/5' : 'border-border',
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="tabular block font-black">{money(payment.amount)}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {payment.mode} - {dateTime(payment.date)}
+                    </span>
+                  </span>
+                  {selectedId === payment.id ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" />
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {selected ? (
+            <form className="space-y-3 border-t-2 border-border pt-3" onSubmit={(e) => void saveCorrection(e)}>
+              <Field label="Amount received" htmlFor="modify-payment-amount">
+                <Input
+                  id="modify-payment-amount"
+                  name="modify-payment-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  className="h-16 text-2xl font-black"
+                />
+              </Field>
+              <Field label="Paid By" htmlFor="modify-payment-mode">
+                <Select
+                  value={mode}
+                  onValueChange={setMode}
+                  options={PAYMENT_MODES.map((item) => ({ value: item, label: item }))}
+                />
+              </Field>
+              <Field label="Note" htmlFor="modify-payment-note" optional>
+                <Textarea
+                  id="modify-payment-note"
+                  name="modify-payment-note"
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  rows={2}
+                />
+              </Field>
+              <Button type="submit" size="lg" loading={busy || saving} disabled={unchanged} className="w-full gap-2">
+                <CheckCircle2 className="h-5 w-5" /> Save this amount
+              </Button>
+            </form>
+          ) : (
+            <p className="rounded-xl border-2 border-dashed px-4 py-5 text-center text-sm text-muted-foreground">
+              Tap the payment you need to correct.
+            </p>
+          )}
+
+          <Button variant="ghost" className="w-full gap-2" onClick={() => setView('take')}>
+            <Wallet className="h-5 w-5" /> Back to taking a payment
+          </Button>
+        </div>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
       title="Take payment"
       description={balance > 0 ? `${money(balance)} is still due` : 'Advance or extra payment'}
     >
@@ -720,6 +1030,151 @@ function PaymentSheet({
 
         <Button size="lg" className="w-full" loading={busy || saving} onClick={() => void submit()}>
           Save Payment
+        </Button>
+
+        {payments.length > 0 ? (
+          <div className="space-y-2 border-t-2 border-border pt-3">
+            <Button variant="outline" className="w-full gap-2" onClick={() => setView('modify')}>
+              <Pencil className="h-5 w-5" /> Modify a payment received
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              {money(payments.reduce((sum, payment) => sum + payment.amount, 0))} received so far. Wrong
+              amount? Correct it here instead of adding a second payment.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Re-prices the job. The total is the number the customer agrees at the counter,
+ * and it is often wrong until the repair is actually opened up, so it has to be
+ * one tap from the top of the bill rather than buried in the full edit form.
+ *
+ * Money already taken is never touched here. Lowering the total does not take
+ * money back; it changes what the customer still owes, and if the new total
+ * would sit under what they have already paid, the server refuses it - the shop
+ * has to correct the payment itself, so both numbers have to keep meaning
+ * something.
+ */
+function TotalSheet({
+  open,
+  onOpenChange,
+  finalAmount,
+  discount,
+  paidAmount,
+  partsTotal,
+  busy,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  finalAmount: number;
+  discount: number;
+  paidAmount: number;
+  partsTotal: number;
+  busy: boolean;
+  onSave: (body: { finalAmount: number; discount: number }) => Promise<void>;
+}): JSX.Element {
+  const toast = useToast();
+  const [total, setTotal] = useState(String(finalAmount));
+  const [off, setOff] = useState(String(discount));
+  const [saving, setSaving] = useState(false);
+
+  const totalValue = Number(total);
+  const offValue = Number(off) || 0;
+  const payable = round2(totalValue - offValue);
+  const left = round2(payable - paidAmount);
+
+  const reset = (next: boolean): void => {
+    if (!next) {
+      setTotal(String(finalAmount));
+      setOff(String(discount));
+    }
+    onOpenChange(next);
+  };
+
+  // The two floors the server enforces, shown before the save is attempted so
+  // the counter finds out here rather than from an error.
+  const belowParts = partsTotal > 0 && totalValue < partsTotal;
+  const belowPaid = totalValue < paidAmount;
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={reset}
+      title="Change the total"
+      description="What the customer has to pay for this repair."
+    >
+      <div className="space-y-3 pb-2">
+        <Field label="Total" htmlFor="total-amount">
+          <Input
+            id="total-amount"
+            name="total-amount"
+            type="number"
+            inputMode="decimal"
+            value={total}
+            onChange={(event) => setTotal(event.target.value)}
+            className="h-16 text-2xl font-black"
+          />
+        </Field>
+        <Field label="Discount" htmlFor="total-discount" optional>
+          <Input
+            id="total-discount"
+            name="total-discount"
+            type="number"
+            inputMode="decimal"
+            value={off}
+            onChange={(event) => setOff(event.target.value)}
+          />
+        </Field>
+
+        {partsTotal > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Parts on this repair come to {money(partsTotal)}.
+            {belowParts ? ' The total cannot be less than that.' : ''}
+          </p>
+        ) : null}
+
+        {paidAmount > 0 ? (
+          <p className={cn('text-xs', belowPaid ? 'font-bold text-destructive' : 'text-muted-foreground')}>
+            {money(paidAmount)} has already been paid.
+            {belowPaid
+              ? ' The total cannot be less than that. Correct the payment instead.'
+              : ' Money already paid is not changed here.'}
+          </p>
+        ) : null}
+
+        {!belowParts && !belowPaid && Number.isFinite(totalValue) ? (
+          <div className="rounded-xl bg-secondary p-3 text-center">
+            <p className="text-2xs font-bold uppercase tracking-wide text-muted-foreground">
+              Balance after this change
+            </p>
+            <p className="tabular text-lg font-black">{money(Math.max(0, left))}</p>
+          </div>
+        ) : null}
+
+        <Button
+          size="lg"
+          className="w-full"
+          loading={busy || saving}
+          disabled={!Number.isFinite(totalValue) || belowParts || belowPaid}
+          onClick={() => {
+            if (totalValue < 0 || offValue < 0) {
+              toast.error('Enter a valid amount');
+              return;
+            }
+            setSaving(true);
+            void onSave({ finalAmount: round2(totalValue), discount: round2(offValue) })
+              .catch((caught: unknown) =>
+                toast.error('Could not change the total', caught instanceof Error ? caught.message : undefined),
+              )
+              .finally(() => setSaving(false));
+          }}
+        >
+          Save Total
         </Button>
       </div>
     </Sheet>
@@ -1005,6 +1460,213 @@ function EditOrderSheet({
   );
 }
 
+function CancelOrderSheet({
+  open,
+  onOpenChange,
+  order,
+  busy,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  order: {
+    id: string;
+    customerName: string;
+    mobile: string;
+    brand: string;
+    model: string;
+    deviceType: string;
+    paidAmount: number;
+    balance: number;
+  };
+  busy: boolean;
+  onConfirm: (reason: string) => Promise<void>;
+}): JSX.Element {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [reason, setReason] = useState('Customer changed mind');
+  const [customReason, setCustomReason] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setStep(1);
+      setReason('Customer changed mind');
+      setCustomReason('');
+      setAcknowledged(false);
+    }
+  }, [open]);
+
+  const reasons = [
+    'Customer changed mind',
+    'Parts unavailable / too costly',
+    'Customer took device back without repair',
+    'Device dead / unrepairable',
+    'Other reason',
+  ];
+
+  const effectiveReason = reason === 'Other reason' && customReason.trim() ? customReason.trim() : reason;
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={step === 1 ? `Cancel Bill - Step 1 of 2` : `Cancel Bill - Step 2 of 2`}
+    >
+      <div className="space-y-4 pb-2">
+        {/* 2-Step Progress Indicator */}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div
+            className={cn(
+              'rounded-xl border p-2.5 text-center font-bold transition-all',
+              step === 1
+                ? 'border-destructive bg-destructive/10 text-destructive shadow-2xs'
+                : 'border-muted bg-muted/30 text-muted-foreground opacity-60',
+            )}
+          >
+            <div className="text-2xs uppercase tracking-wider">Step 1</div>
+            <div>Reason & Impact</div>
+          </div>
+          <div
+            className={cn(
+              'rounded-xl border p-2.5 text-center font-bold transition-all',
+              step === 2
+                ? 'border-destructive bg-destructive/10 text-destructive shadow-2xs'
+                : 'border-muted bg-muted/30 text-muted-foreground opacity-60',
+            )}
+          >
+            <div className="text-2xs uppercase tracking-wider">Step 2</div>
+            <div>Final Confirmation</div>
+          </div>
+        </div>
+
+        {step === 1 ? (
+          <div className="space-y-3.5">
+            {/* Bill Summary */}
+            <div className="rounded-xl border bg-secondary/50 p-3 space-y-1 text-sm">
+              <div className="flex justify-between items-center font-bold">
+                <span className="text-foreground">{order.customerName}</span>
+                <span className="font-mono text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">
+                  {order.id}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {deviceLabel(order.brand, order.model, order.deviceType)} {order.mobile ? `· ${order.mobile}` : ''}
+              </p>
+            </div>
+
+            {/* Refund Notice */}
+            {order.paidAmount > 0 ? (
+              <InlineNotice tone="warning">
+                <strong>Refund Required:</strong> ₹{money(order.paidAmount)} was received as advance on this bill. Cancelling will close this repair and require returning {money(order.paidAmount)} in cash to the customer.
+              </InlineNotice>
+            ) : (
+              <InlineNotice tone="info">
+                No advance was collected on this bill. Cancelling will mark it closed without refund needed.
+              </InlineNotice>
+            )}
+
+            {/* Select Reason */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Step 1: Reason for Cancellation
+              </label>
+              <div className="space-y-1.5">
+                {reasons.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setReason(r)}
+                    className={cn(
+                      'w-full text-left rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all',
+                      reason === r
+                        ? 'border-destructive bg-destructive/10 text-destructive shadow-2xs font-bold'
+                        : 'border-input hover:bg-secondary/70 text-foreground',
+                    )}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              {reason === 'Other reason' ? (
+                <Input
+                  placeholder="Specify cancellation reason..."
+                  value={customReason}
+                  onChange={(e) => setCustomReason(e.target.value)}
+                  className="mt-2"
+                />
+              ) : null}
+            </div>
+
+            {/* Step 1 Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Keep Bill Active
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => setStep(2)}
+                className="gap-1.5 font-bold"
+              >
+                Proceed to Step 2 →
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3.5">
+            {/* Step 2 Danger Notice */}
+            <InlineNotice tone="error">
+              <strong>Final Step:</strong> Are you completely sure you want to cancel bill <strong>{order.id}</strong>? Once cancelled, the bill cannot be moved back to repairing or delivered.
+            </InlineNotice>
+
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2 text-sm">
+              <div className="flex justify-between items-center text-xs font-semibold text-muted-foreground">
+                <span>Cancellation Reason:</span>
+                <span className="font-bold text-foreground">{effectiveReason}</span>
+              </div>
+              {order.paidAmount > 0 ? (
+                <div className="border-t border-destructive/20 pt-2 flex justify-between items-center text-destructive font-bold text-sm">
+                  <span>Cash Refund to Customer:</span>
+                  <span className="tabular">{money(order.paidAmount)}</span>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Explicit Confirmation Checkbox */}
+            <label className="flex items-start gap-3 rounded-xl border-2 border-input bg-card p-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                className="mt-0.5 h-5 w-5 rounded accent-destructive cursor-pointer"
+              />
+              <span className="text-xs font-bold leading-snug text-foreground">
+                I have verified and confirm cancellation of bill {order.id}
+                {order.paidAmount > 0 ? ` and acknowledge refund of ${money(order.paidAmount)}` : ''}.
+              </span>
+            </label>
+
+            {/* Step 2 Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button variant="outline" onClick={() => setStep(1)} disabled={busy}>
+                ← Back to Step 1
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={!acknowledged || busy}
+                loading={busy}
+                onClick={() => void onConfirm(effectiveReason)}
+                className="font-bold"
+              >
+                Yes, Cancel Bill
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
 /**
  * Picks what to charge for. It deliberately shows only the name and the price
  * - how many are on the shelf is stock information and does not belong on a
@@ -1014,56 +1676,164 @@ function BillItemPicker({
   open,
   onOpenChange,
   onPick,
+  onAddTyped,
   excludeIds = [],
+  busy = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPick: (part: PartListItem) => void;
+  onAddTyped: (input: { name: string; quantity: number; unitPrice: number }) => void;
   excludeIds?: string[];
+  busy?: boolean;
 }): JSX.Element {
   const [search, setSearch] = useState('');
+  const [mode, setMode] = useState<'list' | 'typed'>('list');
+  const [name, setName] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  const [price, setPrice] = useState('');
+  const [touched, setTouched] = useState(false);
   const debounced = useDebounced(search, 200);
   const { data, isLoading } = useParts(debounced, false);
 
   const items = (data ?? []).filter((part) => !excludeIds.includes(part.id));
 
+  const reset = (): void => {
+    setSearch('');
+    setName('');
+    setQuantity('1');
+    setPrice('');
+    setTouched(false);
+    setMode('list');
+  };
+
+  const qty = Number(quantity);
+  const rupees = Number(price);
+  const nameError = touched && !name.trim() ? 'Type what the item is' : '';
+  const priceError =
+    touched && (!Number.isFinite(rupees) || rupees < 0) ? 'Enter a price' : '';
+  const canAdd = name.trim() !== '' && Number.isFinite(rupees) && rupees >= 0 && Number.isInteger(qty) && qty > 0;
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title="Add to this bill" description="Name and price only.">
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+      title="Add to this bill"
+      description="Pick from the price list, or type the item and its price."
+    >
       <div className="space-y-3 pb-2">
-        <Input
-          id="bill-item-search"
-          name="bill-item-search"
-          aria-label="Search item name"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search item name"
-          autoFocus
-        />
-        {isLoading && !data ? (
-          <LoadingBlock label="Loading items..." />
-        ) : items.length === 0 ? (
-          <p className="rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-            {search ? 'Nothing matches that search.' : 'No items on the price list yet.'}
-          </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant={mode === 'list' ? 'default' : 'outline'}
+            onClick={() => setMode('list')}
+            className="gap-2"
+          >
+            <Package className="h-4 w-4" /> Price list
+          </Button>
+          <Button
+            variant={mode === 'typed' ? 'default' : 'outline'}
+            onClick={() => setMode('typed')}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" /> Type it in
+          </Button>
+        </div>
+
+        {mode === 'list' ? (
+          <>
+            <Input
+              id="bill-item-search"
+              name="bill-item-search"
+              aria-label="Search item name"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search item name"
+              autoFocus
+            />
+            {isLoading && !data ? (
+              <LoadingBlock label="Loading items..." />
+            ) : items.length === 0 ? (
+              <p className="rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                {search ? 'Nothing matches that search.' : 'No items on the price list yet.'}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {items.map((part) => (
+                  <li key={part.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPick(part);
+                        onOpenChange(false);
+                        reset();
+                      }}
+                      className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-xl border-2 border-border px-3 text-left"
+                    >
+                      <span className="min-w-0 truncate font-bold">{part.name}</span>
+                      <span className="tabular shrink-0 font-black">{money(part.sellingPrice)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
-          <ul className="space-y-2">
-            {items.map((part) => (
-              <li key={part.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPick(part);
-                    onOpenChange(false);
-                    setSearch('');
-                  }}
-                  className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-xl border-2 border-border px-3 text-left"
-                >
-                  <span className="min-w-0 truncate font-bold">{part.name}</span>
-                  <span className="tabular shrink-0 font-black">{money(part.sellingPrice)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setTouched(true);
+              if (!canAdd) return;
+              onAddTyped({ name: name.trim(), quantity: qty, unitPrice: rupees });
+              onOpenChange(false);
+              reset();
+            }}
+          >
+            <Field label="Item name" htmlFor="typed-part-name" error={nameError}>
+              <Input
+                id="typed-part-name"
+                name="typed-part-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Display, battery, paste..."
+                className="h-14"
+                autoFocus
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="How many" htmlFor="typed-part-qty">
+                <Input
+                  id="typed-part-qty"
+                  name="typed-part-qty"
+                  {...numberPad}
+                  value={quantity}
+                  onChange={(event) => setQuantity(event.target.value)}
+                  className="h-14 text-center"
+                />
+              </Field>
+              <Field label="Price each" htmlFor="typed-part-price" error={priceError}>
+                <Input
+                  id="typed-part-price"
+                  name="typed-part-price"
+                  inputMode="decimal"
+                  value={price}
+                  onChange={(event) => setPrice(event.target.value)}
+                  placeholder="0"
+                  className="h-14 text-center"
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Typed in at the counter, so it is billed and printed like any other line but
+              comes off no stock.
+            </p>
+            <Button type="submit" size="lg" loading={busy} disabled={!canAdd} className="w-full gap-2">
+              <Plus className="h-5 w-5" /> Add to this bill
+            </Button>
+          </form>
         )}
       </div>
     </Sheet>

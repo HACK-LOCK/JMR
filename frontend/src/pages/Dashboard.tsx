@@ -191,7 +191,7 @@ function CompactOrderRow({ order }: { order: OrderSummary }): JSX.Element {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="tabular text-sm font-black text-primary">{order.id}</span>
-              <PaymentBadge status={order.paymentStatus} />
+              <PaymentBadge status={order.paymentStatus} payable={order.payable} />
             </div>
             <p className="mt-1 truncate text-base font-bold leading-tight">{order.customerName}</p>
             <p className="tabular truncate text-sm text-muted-foreground">

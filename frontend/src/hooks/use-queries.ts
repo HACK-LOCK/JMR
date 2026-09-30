@@ -312,7 +312,27 @@ export function useRecordPayment(id: string) {
   });
 }
 
-export function useDeletePayment(id: string) {
+/**
+ * Corrects a payment already on the bill. It changes that same payment rather
+ * than adding a second one, so the bill's paid, balance and payment status all
+ * follow without the shop looking like it took the money twice.
+ */
+export function useUpdatePayment(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { paymentId: string; amount: number; mode?: string; note?: string }) =>
+    api.patch<OrderDetail>(`/orders/${id}/payments/${body.paymentId}`, {
+      amount: body.amount,
+      mode: body.mode,
+      note: body.note,
+    }),
+    onSuccess: () => {
+    void client.invalidateQueries();
+    },
+    });
+    }
+
+    export function useDeletePayment(id: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (paymentId: string) => api.del<OrderDetail>(`/orders/${id}/payments/${paymentId}`),
@@ -325,7 +345,7 @@ export function useDeletePayment(id: string) {
 export function useAddOrderPart(id: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: { partId: string; quantity: number; unitPrice?: number }) =>
+    mutationFn: (body: { partId: string; name?: string; quantity: number; unitPrice?: number }) =>
       api.post<OrderDetail>(`/orders/${id}/parts`, body),
     onSuccess: () => {
       void client.invalidateQueries();
@@ -357,6 +377,17 @@ export function useCreatePart() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<PartListItem>('/parts', body),
+    onSuccess: () => {
+      void client.invalidateQueries();
+    },
+  });
+}
+
+export function useImportParts() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { items: { name: string; brand: string; quantity: number }[]; idempotencyKey: string }) =>
+      api.post<{ created: number; toppedUp: number; unchanged: number; total: number }>('/parts/import', body),
     onSuccess: () => {
       void client.invalidateQueries();
     },
@@ -464,11 +495,6 @@ export function useDeleteSupplier() {
   });
 }
 
-/**
- * Asks the server whether the stock PIN is right. The PIN is never stored in
- * the app - the answer comes back as a simple yes plus how long the unlock
- * lasts, so nothing about the PIN itself is kept on the phone.
- */
 export function useStockUnlock() {
   return useMutation({
     // postKeepingSession, not post: a wrong PIN has to come back as "Wrong PIN"
@@ -484,6 +510,8 @@ export function useStockUnlock() {
  */
 export function useVerifyShopPin() {
   return useMutation({
+    // postKeepingSession, not post: a wrong PIN has to come back as "Wrong PIN"
+    // with the person still signed in, not as a sign-out.
     mutationFn: (pin: string) => api.postKeepingSession<{ verified: boolean }>('/auth/pin/verify', { pin }),
   });
 }

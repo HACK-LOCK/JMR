@@ -297,6 +297,160 @@ async function main() {
     removed.json?.data?.finalAmount,
   );
 
+  section('A supplier list is imported in one go');
+  {
+    const brand = `E2E Import ${stamp}`;
+    const imported = await call('POST', '/parts/import', {
+      items: [
+        { name: `LED Flash ${stamp}`, brand, quantity: 4 },
+        { name: `Speaker Grill ${stamp}`, brand, quantity: 2 },
+        { name: `Screw Pack ${stamp}`, brand, quantity: 15 },
+      ],
+      idempotencyKey: `e2e-import-${stamp}`,
+    });
+    check('the import returns 201 and a summary', imported.status === 201, imported.json);
+    check('three brand-new items were created', imported.json?.data?.created === 3, imported.json?.data);
+    check('nothing was topped up on a first import', imported.json?.data?.toppedUp === 0, imported.json?.data);
+
+    // The same list comes back next month, and it must add to what is there
+    // instead of creating a second "LED Flash" row.
+    const again = await call('POST', '/parts/import', {
+      items: [
+        { name: `LED Flash ${stamp}`, brand, quantity: 4 },
+        { name: `Speaker Grill ${stamp}`, brand, quantity: 2 },
+      ],
+      idempotencyKey: `e2e-import-${stamp}-month2`,
+    });
+    check(
+      'a repeat list tops up instead of duplicating',
+      again.json?.data?.created === 0 && again.json?.data?.toppedUp === 2,
+      again.json?.data,
+    );
+
+    const search = await call('GET', `/parts?q=${encodeURIComponent(stamp)}`);
+    const led = (search.json?.data ?? []).find((item) => item.name === `LED Flash ${stamp}`);
+    check('the imported item is on the shelf', !!led, search.json?.data?.slice(0, 10));
+    check('quantity was added on top of the opening stock', led?.quantity === 8, led?.quantity);
+
+    // Sending the same file twice (a stuck button, a double tap) must not
+    // double the quantity. One key per file is the guard.
+    const replay = await call('POST', '/parts/import', {
+      items: [
+        { name: `LED Flash ${stamp}`, brand, quantity: 4 },
+        { name: `Speaker Grill ${stamp}`, brand, quantity: 2 },
+      ],
+      idempotencyKey: `e2e-import-${stamp}-month2`,
+    });
+    check('an import replayed with the same key is refused', replay.status === 409, {
+      status: replay.status,
+      body: replay.json,
+    });
+    const afterReplay = await call('GET', `/parts?q=${encodeURIComponent(stamp)}`);
+    const ledAgain = (afterReplay.json?.data ?? []).find((item) => item.name === `LED Flash ${stamp}`);
+    check('the replay did not double the quantity', ledAgain?.quantity === 8, ledAgain?.quantity);
+
+    const empty = await call('POST', '/parts/import', { items: [], idempotencyKey: `e2e-import-empty-${stamp}` });
+    check('an empty list is refused', empty.status === 422, { status: empty.status });
+  }
+
+  section('An imported list carries brand and category on each item');
+  {
+    // The app's reader files every row under a brand and a shelf section before
+    // it calls the API, so a row arrives with its own brand and category.
+    const brand = `E2E Brand ${stamp}`;
+    const imported = await call('POST', '/parts/import', {
+      items: [
+        { name: `Battery ${stamp}`, brand, category: 'Battery', quantity: 3 },
+        { name: `Display ${stamp}`, brand, category: 'Display', quantity: 2 },
+        { name: `Screw ${stamp}`, brand, quantity: 5 },
+      ],
+      idempotencyKey: `e2e-import-cat-${stamp}`,
+    });
+    check('the import accepts the categories', imported.status === 201 && imported.json?.data?.created === 3, imported.json?.data);
+
+    const list = await call('GET', `/parts?q=${encodeURIComponent(stamp)}`);
+    const byName = (name) => (list.json?.data ?? []).find((item) => item.name === name);
+    check('a Battery row is stored under its brand in the Battery section', byName(`Battery ${stamp}`)?.brand === brand && byName(`Battery ${stamp}`)?.category === 'Battery', byName(`Battery ${stamp}`));
+    check('a Display row keeps its own section', byName(`Display ${stamp}`)?.category === 'Display', byName(`Display ${stamp}`));
+    check('a row without a category stays a plain repair part', byName(`Screw ${stamp}`)?.category === 'Repair Part', byName(`Screw ${stamp}`));
+  }
+
+  section('A mistyped payment is corrected in place, not added to');
+  const taken = await call('POST', `/orders/${orderId}/payments`, {
+    amount: 450,
+    mode: 'Cash',
+    note: 'counted wrong at the counter',
+    idempotencyKey: `${orderId}-mistyped`,
+  });
+  check('a payment is taken to be corrected', taken.status === 201, taken.json);
+  const beforeFix = await call('GET', `/orders/${orderId}`);
+  const payCountBefore = beforeFix.json?.data?.payments?.length ?? 0;
+  const fixTarget = beforeFix.json?.data?.payments?.at(-1);
+  check('the bill holds exactly that one payment', payCountBefore === 1, payCountBefore);
+  const corrected = await call('PATCH', `/orders/${orderId}/payments/${fixTarget?.id}`, {
+    amount: 400,
+    note: 'counted wrong at the counter',
+  });
+  check('the payment is corrected', corrected.status === 200, corrected.json);
+  check(
+    'the bill shows the corrected amount as paid',
+    corrected.json?.data?.paidAmount === 400,
+    corrected.json?.data?.paidAmount,
+  );
+  check(
+    'the balance follows the correction',
+    corrected.json?.data?.balance === 1500 - 400,
+    { balance: corrected.json?.data?.balance },
+  );
+  check(
+    'the payment status follows the correction',
+    corrected.json?.data?.paymentStatus === 'Partially Paid',
+    corrected.json?.data?.paymentStatus,
+  );
+  check(
+    'no second payment row was created',
+    (corrected.json?.data?.payments?.length ?? 0) === payCountBefore,
+    { before: payCountBefore, after: corrected.json?.data?.payments?.length },
+  );
+  check(
+    'the same payment id is still the one on the bill',
+    (corrected.json?.data?.payments ?? []).some((p) => p.id === fixTarget?.id && p.amount === 400),
+    corrected.json?.data?.payments,
+  );
+  const overPaid = await call('PATCH', `/orders/${orderId}/payments/${fixTarget?.id}`, { amount: 99999 });
+  check('an over-payment correction is refused', overPaid.status === 422, overPaid.json);
+  const negativeCorrect = await call('PATCH', `/orders/${orderId}/payments/${fixTarget?.id}`, { amount: -10 });
+  check('a negative correction is refused', negativeCorrect.status === 422, negativeCorrect.json);
+  const wrongBill = await call('PATCH', `/orders/${orderId}/payments/PAY-does-not-exist`, { amount: 50 });
+  check("correcting another bill's payment is refused", wrongBill.status === 404, wrongBill.json);
+  // Back to nothing, so the full-payment checks further down start clean.
+  await call('DELETE', `/orders/${orderId}/payments/${fixTarget?.id}`);
+
+  section('A line typed in at the counter is billed but owns no stock');
+  const typed = await call('POST', `/orders/${orderId}/parts`, {
+    name: `E2E Typed Paste ${stamp}`,
+    quantity: 2,
+    unitPrice: 150,
+  });
+  check('a typed-in name and price is accepted', typed.status === 200, typed.json);
+  const typedLine = (typed.json?.data?.parts ?? []).find((line) => line.partName === `E2E Typed Paste ${stamp}`);
+  check('the typed line is on the bill', !!typedLine, typed.json?.data?.parts);
+  check('the typed line carries no stock part id', typedLine?.partId === '', typedLine?.partId);
+  check(
+    'the typed line is billed at quantity x price',
+    typed.json?.data?.finalAmount === 1800,
+    typed.json?.data?.finalAmount,
+  );
+  const useTyped = await call('POST', `/orders/${orderId}/parts/${typedLine?.id}/use`, {});
+  check(
+    'a typed line cannot be marked used, and says why',
+    useTyped.status === 409 && /typed in/.test(useTyped.json?.error?.message ?? ''),
+    useTyped.json,
+  );
+  const noName = await call('POST', `/orders/${orderId}/parts`, { quantity: 1, unitPrice: 100 });
+  check('a line with neither an item nor a name is refused', noName.status === 422, noName.json);
+  await call('DELETE', `/orders/${orderId}/parts/${typedLine?.id}`);
+
   for (const status of ['Checking', 'Approved', 'Repairing', 'Ready']) {
     const move = await call('POST', `/orders/${orderId}/status`, { status });
     check(`status -> ${status}`, move.status === 200 && move.json?.data?.status === status, move.json);
@@ -341,6 +495,205 @@ async function main() {
     idempotencyKey: `e2e-over-${stamp}`,
   });
   check('paying more than the balance is rejected', overpay.status >= 400, overpay.json);
+
+  section('A bill can be opened before anyone knows the price');
+  const unpriced = await call('POST', '/orders', {
+    customerName: 'E2E Unpriced',
+    mobile: `97${String(stamp).slice(-8)}`,
+    brand: 'Brand',
+    model: 'Model X',
+    complaint: 'Diagnosis only',
+    estimatedAmount: 0,
+    discount: 0,
+    advance: 0,
+    parts: [],
+  });
+  check('a bill with no amount is created', unpriced.status === 201, unpriced.json);
+  const unpricedOrder = unpriced.json?.data?.order ?? unpriced.json?.data;
+  check(
+    'an unpriced bill starts at 0 and owes nothing',
+    unpricedOrder?.finalAmount === 0 &&
+      unpricedOrder?.payable === 0 &&
+      unpricedOrder?.balance === 0 &&
+      unpricedOrder?.paidAmount === 0,
+    {
+      final: unpricedOrder?.finalAmount,
+      payable: unpricedOrder?.payable,
+      balance: unpricedOrder?.balance,
+      paid: unpricedOrder?.paidAmount,
+    },
+  );
+  check(
+    'an unpriced bill is not reported as Paid',
+    unpricedOrder?.paymentStatus === 'Unpaid',
+    unpricedOrder?.paymentStatus,
+  );
+
+  const noAmountField = await call('POST', '/orders', {
+    customerName: 'E2E Blank Amount',
+    mobile: `96${String(stamp).slice(-8)}`,
+    brand: 'Brand',
+    model: 'Model Y',
+    complaint: 'Left the price blank',
+    parts: [],
+  });
+  check('a bill saved with the amount left empty is created', noAmountField.status === 201, noAmountField.json);
+  const blankOrder = noAmountField.json?.data?.order ?? noAmountField.json?.data;
+  check(
+    'an empty amount saves as 0, not as an error',
+    blankOrder?.finalAmount === 0 && blankOrder?.paymentStatus === 'Unpaid',
+    { final: blankOrder?.finalAmount, status: blankOrder?.paymentStatus },
+  );
+
+  const quoteLater = await call('PATCH', `/orders/${unpricedOrder?.id}`, { finalAmount: 400 });
+  check('the price can be set later on the bill', quoteLater.status === 200, quoteLater.json);
+  check(
+    'quoting later turns it into a bill that owes money',
+    quoteLater.json?.data?.balance === 400 && quoteLater.json?.data?.paymentStatus === 'Unpaid',
+    { balance: quoteLater.json?.data?.balance, status: quoteLater.json?.data?.paymentStatus },
+  );
+
+  const negativePrice = await call('PATCH', `/orders/${unpricedOrder?.id}`, { finalAmount: -5 });
+  check('a negative price is refused', negativePrice.status === 422, negativePrice.json);
+
+  section('Zero is a real amount in the payment section');
+  const zeroPayment = await call('POST', `/orders/${unpricedOrder?.id}/payments`, {
+    amount: 0,
+    mode: 'Cash',
+    idempotencyKey: `e2e-zero-${stamp}`,
+  });
+  check('a 0 payment is accepted', zeroPayment.status === 201, zeroPayment.json);
+  check(
+    'a 0 payment is written down without changing the money',
+    zeroPayment.json?.data?.payments?.length === 1 &&
+      zeroPayment.json?.data?.payments?.[0]?.amount === 0 &&
+      zeroPayment.json?.data?.paidAmount === 0 &&
+      zeroPayment.json?.data?.balance === 400,
+    {
+      rows: zeroPayment.json?.data?.payments?.length,
+      paid: zeroPayment.json?.data?.paidAmount,
+      balance: zeroPayment.json?.data?.balance,
+    },
+  );
+
+  const negativePayment = await call('POST', `/orders/${unpricedOrder?.id}/payments`, {
+    amount: -1,
+    mode: 'Cash',
+    idempotencyKey: `e2e-neg-${stamp}`,
+  });
+  check('a negative payment is refused', negativePayment.status === 422, negativePayment.json);
+
+  // A 0 entry says no money changed hands, so it must not claim to be how the
+  // bill was paid. Taken on a bill that really was settled by UPI.
+  const upiBill = await call('POST', '/orders', {
+    customerName: 'E2E UPI Paid',
+    mobile: `93${String(stamp).slice(-8)}`,
+    brand: 'Brand',
+    model: 'Model U',
+    complaint: 'paid by UPI',
+    estimatedAmount: 200,
+    parts: [],
+  });
+  const upiId = (upiBill.json?.data?.order ?? upiBill.json?.data)?.id;
+  const upiPaid = await call('POST', `/orders/${upiId}/payments`, {
+    amount: 200,
+    mode: 'UPI',
+    idempotencyKey: `e2e-upi-${stamp}`,
+  });
+  check('the UPI bill is paid in full', upiPaid.status === 201, upiPaid.json);
+  const zeroAfterUpi = await call('POST', `/orders/${upiId}/payments`, {
+    amount: 0,
+    mode: 'Cash',
+    idempotencyKey: `e2e-zero-upi-${stamp}`,
+  });
+  check(
+    'a 0 entry does not overwrite how the bill was really paid',
+    zeroAfterUpi.json?.data?.paymentMode === 'UPI',
+    { mode: zeroAfterUpi.json?.data?.paymentMode },
+  );
+
+  const zeroOnPaidBill = await call('POST', `/orders/${orderId}/payments`, {
+    amount: 0,
+    mode: 'Cash',
+    idempotencyKey: `e2e-zero-paid-${stamp}`,
+  });
+  check(
+    'a 0 entry is allowed on an already fully paid bill',
+    zeroOnPaidBill.status === 201,
+    { status: zeroOnPaidBill.status, body: zeroOnPaidBill.json },
+  );
+  check(
+    'a 0 entry on a paid bill leaves it paid and does not over-collect',
+    zeroOnPaidBill.json?.data?.paymentStatus === 'Paid' &&
+      zeroOnPaidBill.json?.data?.paidAmount === 1500 &&
+      zeroOnPaidBill.json?.data?.balance === 0,
+    {
+      status: zeroOnPaidBill.json?.data?.paymentStatus,
+      paid: zeroOnPaidBill.json?.data?.paidAmount,
+      balance: zeroOnPaidBill.json?.data?.balance,
+    },
+  );
+
+  // A bill of its own, walked through every stage, so the delivery check further
+  // down still has a Ready-and-paid bill to deliver.
+  for (const stage of ['Received', 'Repairing', 'Ready', 'Delivered']) {
+    const staged = await call('POST', '/orders', {
+      customerName: `E2E Zero ${stage}`,
+      mobile: `94${String(stamp).slice(-8)}`,
+      brand: 'Brand',
+      model: `Stage ${stage}`,
+      complaint: 'zero entry at every stage',
+      estimatedAmount: 400,
+      parts: [],
+    });
+    const stagedId = (staged.json?.data?.order ?? staged.json?.data)?.id;
+    if (stage !== 'Received') {
+      const moved = await call('POST', `/orders/${stagedId}/status`, { status: stage === 'Delivered' ? 'Ready' : stage });
+      check(`a fresh bill moves to ${stage === 'Delivered' ? 'Ready' : stage}`, moved.status === 200, moved.json);
+    }
+    if (stage === 'Delivered') {
+      const paidUp = await call('POST', `/orders/${stagedId}/payments`, {
+        amount: 400,
+        mode: 'Cash',
+        idempotencyKey: `e2e-stage-pay-${stamp}`,
+      });
+      check('the last staged bill is paid in full first', paidUp.status === 201, paidUp.json);
+      const delivered = await call('POST', `/orders/${stagedId}/deliver`, { deliveredTo: 'E2E Customer' });
+      check('the last staged bill is delivered first', delivered.status === 200, delivered.json);
+    }
+    const zeroAtStage = await call('POST', `/orders/${stagedId}/payments`, {
+      amount: 0,
+      mode: 'Cash',
+      idempotencyKey: `e2e-zero-${stage}-${stamp}`,
+    });
+    check(
+      `a 0 entry is allowed at the ${stage} stage`,
+      zeroAtStage.status === 201,
+      { status: zeroAtStage.status, body: zeroAtStage.json },
+    );
+  }
+
+  const cancelZeroBill = await call('POST', '/orders', {
+    customerName: 'E2E Cancelled Zero',
+    mobile: `95${String(stamp).slice(-8)}`,
+    brand: 'Brand',
+    model: 'Model Z',
+    complaint: 'Cancelled job',
+    estimatedAmount: 250,
+    parts: [],
+  });
+  const cancelZeroId = (cancelZeroBill.json?.data?.order ?? cancelZeroBill.json?.data)?.id;
+  await call('POST', `/orders/${cancelZeroId}/status`, { status: 'Cancelled' });
+  const zeroCancelled = await call('POST', `/orders/${cancelZeroId}/payments`, {
+    amount: 0,
+    mode: 'Cash',
+    idempotencyKey: `e2e-zero-cancel-${stamp}`,
+  });
+  check(
+    'a cancelled bill still refuses a 0 entry, its money is a refund',
+    zeroCancelled.status === 409,
+    { status: zeroCancelled.status, body: zeroCancelled.json },
+  );
 
   const pdf = await fetch(`${BASE}/api/orders/${orderId}/bill.pdf`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -452,7 +805,7 @@ async function main() {
   check('bill text is produced', billText.status === 200 && text.length > 50, { status: billText.status });
   check('bill states the correct final amount', /1,?500|1500/.test(text), text.slice(0, 200));
 
-  section('Owner PIN for the dashboard (no stock unlock)');
+  section('The owner PIN behind the hidden dashboard figures');
   // The runner tells the suite which PIN the throwaway server was given, so the
   // shop's real PIN is never read from .env or written into a test log.
   const testPin = process.env.STOCK_PIN;
@@ -479,7 +832,7 @@ async function main() {
   }
 
   section('Bill history');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
   const history = await call('GET', `/orders/history?from=${today}&to=${today}`);
   const h = history.json?.data ?? {};
   check('bill history responds 200', history.status === 200, history.json);

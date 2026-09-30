@@ -3,12 +3,13 @@ import {
   Building2,
   ChevronLeft,
   ClipboardList,
-  FileSpreadsheet,
+  History,
   LayoutDashboard,
   LogOut,
   Moon,
   MoreVertical,
   Package,
+  PackagePlus,
   PlusCircle,
   Search,
   Settings,
@@ -24,6 +25,7 @@ import { useStockAccess } from '@/lib/stock-access';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
+import { DeviceLogSheet } from '@/components/device-log-sheet';
 
 /** The app has exactly two areas. Nothing sits outside them. */
 export type SideKey = 'billing' | 'stock';
@@ -59,9 +61,9 @@ export const SIDES: Record<
     short: 'Stock',
     accent: 'bg-success',
     items: [
-      { to: '/stock', label: 'Stock Desktop', short: 'Stock', icon: Package, end: true, primary: true },
-      { to: '/stock?tab=sync', label: 'Sheet Sync', short: 'Sync', icon: FileSpreadsheet },
-      { to: '/stock?tab=settings', label: 'Settings', short: 'Settings', icon: Settings },
+      { to: '/stock', label: 'Stock Home', short: 'Home', icon: Package, end: true, primary: true },
+      { to: '/stock/import', label: 'Add / Import Stock', short: 'Add/Import', icon: PackagePlus, primary: true },
+      { to: '/stock/settings', label: 'Stock Settings', short: 'Setting', icon: Settings, primary: true },
     ],
   },
 };
@@ -141,14 +143,58 @@ function ThemeToggle(): JSX.Element {
 function MenuItems({
   onSignOut,
   onPick,
+  side,
+  onSideChange,
+  onOpenLogs,
 }: {
   onSignOut: () => void;
   onPick: (to: string) => void;
+  side?: SideKey;
+  onSideChange?: (s: SideKey) => void;
+  onOpenLogs?: () => void;
 }): JSX.Element {
   return (
     <>
+      {/* Billing / Stock switcher — shown only in the mobile 3-dot menu */}
+      {onSideChange ? (
+        <>
+          <div className="px-3 pb-1 pt-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Switch Area</p>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { onSideChange('billing'); onPick('/'); }}
+            className={cn(
+              'flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold transition-colors active:bg-secondary',
+              side === 'billing' ? 'text-primary font-black' : 'text-foreground',
+            )}
+          >
+            <ClipboardList className="h-4 w-4 shrink-0" />
+            Billing
+            {side === 'billing' ? <span className="ml-auto h-2 w-2 rounded-full bg-primary" /> : null}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { onSideChange('stock'); onPick('/stock'); }}
+            className={cn(
+              'flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold transition-colors active:bg-secondary',
+              side === 'stock' ? 'text-success font-black' : 'text-foreground',
+            )}
+          >
+            <Package className="h-4 w-4 shrink-0" />
+            Stock
+            {side === 'stock' ? <span className="ml-auto h-2 w-2 rounded-full bg-success" /> : null}
+          </button>
+          <div className="my-1 border-t" />
+        </>
+      ) : null}
       <MenuItem icon={ClipboardList} label="Bill History" onClick={() => onPick('/bill-history')} />
       <MenuItem icon={Users} label="Customers" onClick={() => onPick('/customers')} />
+      {onOpenLogs ? (
+        <MenuItem icon={History} label="Log / Edit History" onClick={onOpenLogs} />
+      ) : null}
       <div className="my-1 border-t" />
       <MenuItem icon={LogOut} label="Logout" onClick={onSignOut} tone="destructive" />
     </>
@@ -179,7 +225,17 @@ function MoreTrigger({ open, onToggle }: { open: boolean; onToggle: () => void }
  * modal every other pick-something flow uses, which is also what gives it the
  * dimmed screen and the tap-anywhere-to-close.
  */
-function HeaderMenu({ onSignOut }: { onSignOut: () => void }): JSX.Element {
+function HeaderMenu({
+  onSignOut,
+  side,
+  onSideChange,
+  onOpenLogs,
+}: {
+  onSignOut: () => void;
+  side: SideKey;
+  onSideChange: (s: SideKey) => void;
+  onOpenLogs: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -190,12 +246,15 @@ function HeaderMenu({ onSignOut }: { onSignOut: () => void }): JSX.Element {
         open={open}
         onOpenChange={setOpen}
         title="Menu"
-        description="Bill history, customers, and signing out."
+        description="Switch area, bill history, customers, and signing out."
         className="sm:max-w-sm"
       >
         <div className="pb-2">
           <MenuItems
             onSignOut={onSignOut}
+            side={side}
+            onSideChange={(s) => { setOpen(false); onSideChange(s); }}
+            onOpenLogs={() => { setOpen(false); onOpenLogs(); }}
             onPick={(to) => {
               setOpen(false);
               navigate(to);
@@ -218,11 +277,13 @@ function SidebarFooter({
   userName,
   onToggleCollapsed,
   onSignOut,
+  onOpenLogs,
 }: {
   collapsed: boolean;
   userName?: string;
   onToggleCollapsed: () => void;
   onSignOut: () => void;
+  onOpenLogs: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -265,6 +326,10 @@ function SidebarFooter({
           >
             <MenuItems
               onSignOut={onSignOut}
+              onOpenLogs={() => {
+                setOpen(false);
+                onOpenLogs();
+              }}
               onPick={(to) => {
                 setOpen(false);
                 navigate(to);
@@ -342,6 +407,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
   const pathSide = sideForPath(location.pathname);
   const [side, setSide] = useState<SideKey>(pathSide);
   const [collapsed, setCollapsed] = useState(false);
+  const [logSheetOpen, setLogSheetOpen] = useState(false);
 
   const activeSide = pathSide !== side ? pathSide : side;
   const items = SIDES[activeSide].items;
@@ -416,6 +482,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
           userName={user?.name}
           onToggleCollapsed={() => setCollapsed((value) => !value)}
           onSignOut={handleSignOut}
+          onOpenLogs={() => setLogSheetOpen(true)}
         />
       </aside>
 
@@ -434,11 +501,14 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
               </p>
             </div>
             <ThemeToggle />
-            <HeaderMenu onSignOut={handleSignOut} />
+            <HeaderMenu
+              onSignOut={handleSignOut}
+              side={activeSide}
+              onSideChange={handleSideChange}
+              onOpenLogs={() => setLogSheetOpen(true)}
+            />
           </div>
-          <div className="px-3 pb-2.5 md:hidden">
-            <SideSwitcher side={activeSide} onChange={handleSideChange} />
-          </div>
+
         </header>
 
         <main className="flex-1 px-3 pb-28 pt-3 md:px-5 md:pb-8 md:pt-5">{children}</main>
@@ -456,6 +526,8 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
           </div>
         </nav>
       </div>
+
+      <DeviceLogSheet open={logSheetOpen} onOpenChange={setLogSheetOpen} />
     </div>
   );
 }
@@ -523,7 +595,11 @@ export function PageHeader({
 }): JSX.Element {
   const navigate = useNavigate();
   return (
-    <div className="mb-3 flex items-start gap-2">
+    // On a narrow screen a head-wide action (buttons plus a status pill, say)
+    // would squeeze the title to nothing, so the text keeps a floor width and a
+    // wide action wraps onto its own row, pushed to the right. A compact action
+    // that fits stays on the same line as before.
+    <div className="mb-3 flex flex-wrap items-start gap-2">
       {back ? (
         <Button
           variant="outline"
@@ -535,13 +611,13 @@ export function PageHeader({
           <ChevronLeft className="h-5 w-5" />
         </Button>
       ) : null}
-      <div className={cn('min-w-0 flex-1', center && 'text-center')}>
+      <div className={cn('min-w-[9rem] flex-1 sm:min-w-0', center && 'text-center')}>
         <h1 className="truncate text-xl font-black leading-tight tracking-tight md:text-2xl">
           {title}
         </h1>
-        {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+        {subtitle ? <p className="truncate text-sm text-muted-foreground">{subtitle}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="ml-auto shrink-0">{action}</div> : null}
     </div>
   );
 }

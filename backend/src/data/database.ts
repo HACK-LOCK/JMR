@@ -47,8 +47,7 @@ export const DEFAULT_SETTINGS: Omit<ShopSettings, 'updatedAt'> = {
   contact2Name: 'Mitesh',
   contact2Number: '9327394978',
   address: 'M. Tower Chowk, Opposite Market Yard, Modasa Road, Talod',
-  serviceDescription:
-    'We accept mobile phones from every company and provide mobile phone, computer, and electronic-device repair services.',
+  serviceDescription: '',
   upiId: '',
   receiptInformation: 'Device not collected within 90 days may be disposed off.',
   billFooter: 'Thank you! Visit again.',

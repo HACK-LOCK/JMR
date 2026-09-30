@@ -2,8 +2,13 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 /**
  * The owner can put four billing figures away when customers are standing at
- * the counter, and bring them back with the shop PIN. New Bill and Search Order
+ * the counter, and bring them back with the owner PIN. New Bill and Search Order
  * are never hidden - there is nothing else to do without them.
+ *
+ * Everything starts put away: nothing on disk means nothing was decided yet,
+ * and the safe answer then is to keep the figures off the screen. A person who
+ * brings them back with the PIN stores an explicit empty list, which is the one
+ * state that survives a reload without re-asking.
  *
  * The PIN itself never reaches the browser: the server checks it, and all this
  * file remembers is which sections are currently put away.
@@ -17,26 +22,42 @@ function isSection(value: string): value is HiddenSection {
   return (HIDDEN_SECTIONS as readonly string[]).includes(value);
 }
 
-/** A stored value that no longer matches the current list is simply dropped. */
+/**
+ * A stored value that no longer matches the current list is simply dropped.
+ * Nothing stored means nothing was decided yet, and the safe answer then is to
+ * keep every figure off the screen.
+ */
 function readHidden(): Set<HiddenSection> {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return new Set();
+    if (!raw) return new Set(HIDDEN_SECTIONS);
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
+    if (!Array.isArray(parsed)) return new Set(HIDDEN_SECTIONS);
     return new Set(parsed.filter((value): value is HiddenSection => typeof value === 'string' && isSection(value)));
   } catch {
-    return new Set();
+    return new Set(HIDDEN_SECTIONS);
   }
 }
 
 function writeHidden(sections: ReadonlySet<HiddenSection>): void {
   try {
-    if (sections.size === 0) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify([...sections]));
+    // Always stored, even when empty: the absence of the key means "never
+    // decided", which reads as everything hidden, so a revealed dashboard has to
+    // write an empty list or it would be hidden again by the default above.
+    localStorage.setItem(KEY, JSON.stringify([...sections]));
   } catch {
     /* private mode - the choice simply will not be remembered */
   }
+}
+
+/**
+ * Signs in with everything put away, whatever the previous session decided.
+ * The owner brings the figures back with the PIN when they need them, so a
+ * fresh sign-in never starts with the day's money on show.
+ */
+export function hideAllDashboardSections(): void {
+  writeHidden(new Set(HIDDEN_SECTIONS));
+  emit();
 }
 
 /** The shell and the dashboard both read this, so it lives outside a component. */
@@ -83,7 +104,7 @@ function snapshot(): Set<HiddenSection> {
 export interface DashboardVisibility {
   hidden: ReadonlySet<HiddenSection>;
   hide: (section: HiddenSection) => void;
-  /** Asks for the shop PIN. The caller shows the prompt. */
+  /** Asks for the owner PIN. The caller shows the prompt. */
   requestUnhide: () => void;
   /**
    * Called after the server accepted the PIN. Every section comes back at once,

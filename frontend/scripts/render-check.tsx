@@ -31,7 +31,6 @@ import { Input, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { ThemeProvider } from '@/lib/theme';
 import { ToastProvider } from '@/components/ui/toast';
-import { clearStockUnlock, markStockUnlocked } from '@/lib/stock-access';
 import Dashboard from '@/pages/Dashboard';
 import NewBill from '@/pages/NewBill';
 import Orders from '@/pages/Orders';
@@ -42,6 +41,7 @@ import CustomerDetail from '@/pages/CustomerDetail';
 import SearchPage from '@/pages/SearchPage';
 import StockDesktop from '@/pages/StockDesktop';
 import PartDetailPage from '@/pages/PartDetailPage';
+import { clearStockUnlock, markStockUnlocked } from '@/lib/stock-access';
 
 const STOCK_KEY = 'jmmr.stock-unlocked-at';
 const HIDDEN_KEY = 'jmmr.dashboard-hidden';
@@ -52,13 +52,13 @@ const HIDDEN_KEY = 'jmmr.dashboard-hidden';
 
 function stubBrowser(): void {
   const store = new Map<string, string>([
-    ['jmmr.auth.token', 'render-check-token'],
+['jmmr.auth.token', 'render-check-token'],
+    // Already unlocked, so the stock screens render instead of the PIN gate.
+    [STOCK_KEY, String(Date.now())],
     [
       'jmmr.auth.user',
       JSON.stringify({ id: 'USR-1', name: 'Ashok Bhai', username: 'ashok', role: 'OWNER' }),
     ],
-    // Already unlocked, so the stock screens render instead of the PIN gate.
-    [STOCK_KEY, String(Date.now())],
   ]);
 
   const localStorage = {
@@ -203,6 +203,23 @@ const orderDetail = {
   ],
 };
 
+/** A bill that is still on the counter with nobody able to quote a price yet. */
+const unpricedOrder = {
+  ...order(4),
+  id: 'JMR-0009',
+  customerName: 'Walk-in Customer',
+  status: 'Received',
+  finalAmount: 0,
+  payable: 0,
+  paidAmount: 0,
+  balance: 0,
+  paymentStatus: 'Unpaid',
+  parts: [],
+  payments: [],
+  history: [{ id: 'H-9', fromStatus: '', toStatus: 'Received', at: iso(0, 8), user: 'Ashok Bhai' }],
+};
+
+
 const supplier = (n: number) => ({
   id: `SUP-${n}`,
   name: `Supplier ${n}`,
@@ -281,6 +298,7 @@ function seed(client: QueryClient): void {
     collected: 2800,
   });
   set(['order', 'JMR-0001'], orderDetail);
+  set(['order', 'JMR-0009'], unpricedOrder);
   set(['order', 'next-id'], { id: 'JMR-0026' });
   set(['orders', 'history', day(0), day(0)], {
     from: day(0),
@@ -707,24 +725,117 @@ function runSourceChecks(): number {
     statusProblems.push('the shared domain has no COUNTER_STATUSES list for the counter to set');
   } else {
     const offered = ((counterList[1] ?? '').match(/'([^']+)'/g) ?? []).map((q) => q.replace(/'/g, ''));
-    const wanted = ['Received', 'Repairing', 'Delivered', 'Cancelled'];
+    const wanted = ['Received', 'Repairing', 'Ready', 'Delivered', 'Cancelled'];
     if (offered.join('|') !== wanted.join('|')) {
-      statusProblems.push(`the status sheet must offer only ${wanted.join(', ')} (found ${offered.join(', ')})`);
+      statusProblems.push(`the status buttons must offer only ${wanted.join(', ')} (found ${offered.join(', ')})`);
     }
   }
   const detailText = fs.readFileSync(path.join(src, 'pages', 'OrderDetail.tsx'), 'utf8');
-  if (!/COUNTER_STATUSES\.map/.test(detailText)) {
-    statusProblems.push('the status sheet is not driven by COUNTER_STATUSES');
+  if (!/COUNTER_STATUSES\.filter/.test(detailText)) {
+    statusProblems.push('the status buttons are not driven by COUNTER_STATUSES');
   }
   if (/ORDER_STATUSES\.map/.test(detailText)) {
-    statusProblems.push('the status sheet is back to offering every status');
+    statusProblems.push('the status buttons are back to offering every status');
+  }
+  // The counter no longer digs through a menu to move a bill along, so the
+  // "Change Status" button and its sheet have to stay gone.
+  if (/Change Status|statusOpen/.test(detailText)) {
+    statusProblems.push('the Change Status button or its sheet is back on the bill');
+  }
+  // Handing the device over keeps the existing Give Device button, which asks
+  // who took it and still refuses while money is due. A bare Delivered status
+  // button would close the bill without ever recording a name against it.
+  const giveDevice = /Give Device[\s\S]{0,600}setDeliverOpen\(true\)/.test(detailText)
+    || /setDeliverOpen\(true\)[\s\S]{0,600}Give Device/.test(detailText);
+  if (!giveDevice) {
+    statusProblems.push('the Give Device button no longer opens the deliver sheet');
+  }
+  // All of it belongs in the one block under the header, next to the money
+  // button. Checked by distance in the source, so adding another button to that
+  // block (Add Part) cannot quietly break it.
+  const gridAt = detailText.indexOf('<div className="grid grid-cols-2 gap-2.5">');
+  const blockEnd = detailText.indexOf('</div>', gridAt);
+  const topBlock = gridAt === -1 ? '' : detailText.slice(gridAt, blockEnd);
+  if (!/Give Device/.test(topBlock)) {
+    statusProblems.push('the Give Device button is not in the top action block');
+  }
+  if (!/COUNTER_STATUSES\.filter/.test(topBlock)) {
+    statusProblems.push('the status buttons are not in the same block as the Give Device button');
+  }
+  // Money is changed through the three figures at the top of the bill, not
+  // through a separate row of money buttons. A second place to change the same
+  // figure is a second place for it to be out of step.
+  if (/Take Payment/.test(topBlock)) {
+    statusProblems.push('Take Payment must not be its own button; the money figures are the entry point');
+  }
+  if (/Modify Payment/.test(topBlock)) {
+    statusProblems.push('Modify Payment must not be a separate button on the bill');
+  }
+  if ((detailText.match(/Modify a payment received/g) ?? []).length !== 1) {
+    statusProblems.push('the payment sheet must offer "Modify a payment received" exactly once');
+  }
+  // Each figure is checked as a whole <MoneyCell .../> block, not by counting
+  // characters, so reformatting the props cannot make this pass or fail.
+  // The closing tag has to be on its own line, otherwise the component's own
+  // definition matches first and swallows up to the first <Pencil /> inside it.
+  const moneyCells = detailText.match(/<MoneyCell\b[\s\S]*?^\s*\/>/gm) ?? [];
+  // `label` is given exactly as it is written in the source, quotes included.
+  const cellFor = (label: string): string =>
+    moneyCells.find((cell) => cell.includes(`label=${label}`)) ?? '';
+  if (!cellFor('"Total"').includes('setTotalOpen')) {
+    statusProblems.push('the Total figure must open the change-total sheet');
+  }
+  if (!cellFor("{cancelled ? 'Received' : 'Paid'}").includes('setPaymentOpen')) {
+    statusProblems.push('the Paid figure must open the payment sheet');
+  }
+  if (!cellFor("{cancelled ? 'To return' : 'Balance'}").includes('setPaymentOpen')) {
+    statusProblems.push('the Balance figure must open the payment sheet to collect');
+  }
+  // Call and WhatsApp are for every bill, so they belong in the header rather
+  // than taking a row of their own above the money.
+  if (!/<PageHeader[\s\S]{0,400}ContactActions/.test(detailText)) {
+    statusProblems.push('Call and WhatsApp must sit in the bill header, not in their own row');
   }
   if (statusProblems.length === 0) {
-    console.log('  ok    the status sheet offers only Received, Repairing, Delivered, Cancelled');
+    console.log('  ok    the status buttons are Received, Repairing, Ready, Delivered, Cancelled');
   } else {
     problems += 1;
-    console.log('  FAIL  status sheet options');
+    console.log('  FAIL  status button options');
     for (const problem of statusProblems) console.log(`        ${problem}`);
+  }
+
+  // 4b. A bill can be opened before anyone knows what the repair costs, and
+  //     "nothing was taken" is a real answer, so 0 has to stay usable in both
+  //     the new-bill form and the payment sheet. These are the checks that stop
+  //     a 0 quietly becoming an error again.
+  const zeroProblems: string[] = [];
+  const newBillText = fs.readFileSync(path.join(src, 'pages', 'NewBill.tsx'), 'utf8');
+  if (!/label="Bill Amount"[\s\S]{0,200}optional/.test(newBillText)) {
+    zeroProblems.push('Bill Amount must be marked optional; the price can be set later');
+  }
+  // An empty box is a mistake, but a typed 0 is an answer, so the guard has to
+  // test for blankness rather than for "not more than 0". Read line ending
+  // agnostically, so a CRLF checkout cannot make this pass or fail.
+  const takeGuard = detailText.match(/const submit = async \(\)[\s\S]{0,700}?return;\s*\}/)?.[0] ?? '';
+  if (!/amount\.trim\(\) === ''/.test(takeGuard)) {
+    zeroProblems.push('taking a payment must reject an empty box, not a 0');
+  }
+  if (/takeValue <= 0/.test(detailText)) {
+    zeroProblems.push('taking a payment must not refuse 0; nothing collected is a real answer');
+  }
+  if (!/payable=\{order\.payable\}/.test(detailText)) {
+    zeroProblems.push('the bill header must tell the badge the payable, so a 0 bill is not shown as Unpaid');
+  }
+  const badgeText = fs.readFileSync(path.join(src, 'components', 'status-badge.tsx'), 'utf8');
+  if (!/No Amount Yet/.test(badgeText)) {
+    zeroProblems.push('an unpriced bill must not show a red Unpaid badge; it needs the No Amount Yet badge');
+  }
+  if (zeroProblems.length === 0) {
+    console.log('  ok    a bill can be created and paid at 0');
+  } else {
+    problems += 1;
+    console.log('  FAIL  zero amount bills');
+    for (const problem of zeroProblems) console.log(`        ${problem}`);
   }
 
   // 5. The collapsed sidebar is 76px wide and holds three 48px controls, so
@@ -792,19 +903,20 @@ const SCREENS: { path: string; name: string; Page: () => JSX.Element }[] = [
   { path: '/new', name: 'New bill', Page: NewBill },
   { path: '/orders', name: 'All bills / orders', Page: Orders },
   { path: '/orders?scope=delivered', name: 'All bills (delivered)', Page: Orders },
-  { path: '/orders/JMR-0001', name: 'Bill detail', Page: OrderDetail },
-  { path: '/orders/JMR-0001?new=1', name: 'Bill detail (edit open)', Page: OrderDetail },
+{ path: '/orders/JMR-0001', name: 'Bill detail', Page: OrderDetail },
+  { path: '/orders/JMR-0009', name: 'Bill detail (no amount yet)', Page: OrderDetail },
   { path: '/bill-history', name: 'Bill history', Page: BillHistory },
   { path: '/customers', name: 'Customers', Page: Customers },
   { path: '/customers/CUS-1', name: 'Customer detail', Page: CustomerDetail },
   { path: '/search', name: 'Search order', Page: SearchPage },
-  { path: '/stock', name: 'Stock desktop', Page: StockDesktop },
-  { path: '/stock?tab=low', name: 'Stock - low items', Page: StockDesktop },
-  { path: '/stock?tab=in', name: 'Stock - stock in', Page: StockDesktop },
-  { path: '/stock?tab=out', name: 'Stock - stock out', Page: StockDesktop },
-  { path: '/stock?tab=suppliers', name: 'Stock - suppliers', Page: StockDesktop },
-  { path: '/stock?tab=sync', name: 'Stock - sheet sync', Page: StockDesktop },
-  { path: '/stock?tab=settings', name: 'Stock - settings', Page: StockDesktop },
+{ path: '/stock', name: 'Stock home', Page: () => <StockDesktop /> },
+  { path: '/stock?tab=low', name: 'Stock - low items', Page: () => <StockDesktop /> },
+  { path: '/stock?tab=in', name: 'Stock - stock in', Page: () => <StockDesktop /> },
+  { path: '/stock?tab=out', name: 'Stock - stock out', Page: () => <StockDesktop /> },
+  { path: '/stock/import', name: 'Stock - add / import', Page: () => <StockDesktop mode="import" /> },
+  { path: '/stock?tab=suppliers', name: 'Stock - suppliers', Page: () => <StockDesktop /> },
+  { path: '/stock?tab=sync', name: 'Stock - sheet sync', Page: () => <StockDesktop /> },
+  { path: '/stock/settings', name: 'Stock - settings', Page: () => <StockDesktop mode="settings" /> },
   { path: '/parts/PRT-1', name: 'Item history', Page: PartDetailPage },
 ];
 
@@ -915,8 +1027,8 @@ function main(): void {
     { path: '/bill-history', name: 'Bill history', Page: BillHistory },
     { path: '/customers', name: 'Customers', Page: Customers },
       { path: '/search', name: 'Search order', Page: SearchPage },
-    { path: '/stock', name: 'Stock desktop', Page: StockDesktop },
-  ]) {
+{ path: '/stock', name: 'Stock home', Page: StockDesktop },
+    ]) {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
@@ -1118,9 +1230,34 @@ function main(): void {
       }
     }
     localStorage.removeItem(HIDDEN_KEY);
+
+    // The default is hidden too: nothing stored is "never decided", which reads
+    // as everything put away, exactly as a fresh sign-in leaves it. The owner
+    // brings the figures back with the PIN - there is no third state to load.
+    let defaultHtml = '';
+    try {
+      defaultHtml = renderScreen(client, '/', Dashboard);
+    } catch (error) {
+      failures += 1;
+      console.log(`  FAIL  Billing home with nothing stored - threw while rendering`);
+      console.log(`        ${(error as Error).message.split('\n')[0]}`);
+    }
+    if (defaultHtml) {
+      const figures = ['₹4,200', '₹8,000'].filter((value) => defaultHtml.includes(value));
+      const unhideButtons = (defaultHtml.match(/aria-label="Show [^"]+"/g) ?? []).length;
+      if (figures.length === 0 && unhideButtons === 1) {
+        console.log('  ok    a fresh dashboard starts with the figures hidden');
+      } else {
+        failures += 1;
+        console.log('  FAIL  a fresh dashboard must start hidden');
+        for (const value of figures) console.log(`        still showing the figure: ${value}`);
+        if (unhideButtons !== 1) console.log(`        expected 1 "Show ..." button, found ${unhideButtons}`);
+      }
+    }
   }
 
-  // The PIN gate is the whole point of the split, so check it both ways: a  // locked tab must show nothing from the stock area, and a valid stored
+  // The PIN gate is the whole point of the split, so check it both ways: a
+  // locked tab must show nothing from the stock area, and a valid stored
   // unlock must survive a reload instead of asking again.
   console.log('\n--- stock PIN gate ---');
   const renderStock = (): string => {

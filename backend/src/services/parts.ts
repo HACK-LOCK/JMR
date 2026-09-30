@@ -5,12 +5,12 @@ import {
   type Part,
   type StockMovement,
 } from '../../../shared/domain';
-import { NotFoundError, ValidationError } from '../core/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../core/errors';
 import { newId, nowIso } from '../core/id';
 import { mutate, read, type MutationResult } from '../data/mutate';
 import { applyAdjust, applyStockIn, applyStockOut, applyReturn } from '../domain/stockOps';
 import type { z } from 'zod';
-import type { partCreateSchema } from '../validation/schemas';
+import type { partCreateSchema, stockImportSchema } from '../validation/schemas';
 
 type PartInput = z.infer<typeof partCreateSchema>;
 
@@ -63,7 +63,15 @@ export function listParts(input: { q?: string; lowOnly?: boolean; includeInactiv
           part.id.toLowerCase().includes(q)
         : true,
     )
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      if (input.lowOnly) {
+        const aCrit = a.quantity < 2 ? 0 : 1;
+        const bCrit = b.quantity < 2 ? 0 : 1;
+        if (aCrit !== bCrit) return aCrit - bCrit;
+        if (a.quantity !== b.quantity) return a.quantity - b.quantity;
+      }
+      return a.name.localeCompare(b.name);
+    })
     .map((part) => ({
       ...part,
       low: isLowStock(part),
@@ -128,6 +136,105 @@ export async function createPart(
     data: getPart(result.data),
     ...(result.warning ? { warning: result.warning } : {}),
   }));
+}
+
+export interface StockImportResult {
+  /** Brand-new items added to the list. */
+  created: number;
+  /** Existing items that had the quantity added on top. */
+  toppedUp: number;
+  /** Lines that matched an existing item at quantity 0 - nothing to do. */
+  unchanged: number;
+  /** Every line read from the list, including the unchanged ones. */
+  total: number;
+}
+
+/**
+ * A supplier list imported in one go. New names become items with their opening
+ * stock; names that are already on the shelf get the quantity added on top, so
+ * the same list can come back next month without errors. Runs as one write, so
+ * a list either lands whole or not at all.
+ */
+export async function importParts(
+  input: z.infer<typeof stockImportSchema>,
+  user: string,
+): Promise<MutationResult<StockImportResult>> {
+  const now = nowIso();
+  return mutate((draft) => {
+    // The whole file uses one key (movements get per-line sub keys), so sending
+    // the same list twice is caught before a single quantity is doubled.
+    if (
+      input.idempotencyKey &&
+      draft.stockMovements.some((row) => row.idempotencyKey.startsWith(`${input.idempotencyKey}#`))
+    ) {
+      throw new ConflictError('This stock list was already imported.');
+    }
+
+    let movementIndex = 0;
+    const result: StockImportResult = { created: 0, toppedUp: 0, unchanged: 0, total: 0 };
+    const movementKey = (): string =>
+      input.idempotencyKey ? `${input.idempotencyKey}#${movementIndex++}` : '';
+
+    for (const item of input.items) {
+      const name = item.name.trim();
+      const brand = item.brand.trim();
+      const existing = draft.parts.find(
+        (part) =>
+          part.name.trim().toLowerCase() === name.toLowerCase() &&
+          part.brand.trim().toLowerCase() === brand.toLowerCase(),
+      );
+
+      if (existing) {
+        if (item.quantity > 0) {
+          applyStockIn(draft, {
+            partId: existing.id,
+            quantity: item.quantity,
+            type: 'IN',
+            reason: 'Stock import',
+            idempotencyKey: movementKey(),
+            user,
+          });
+          result.toppedUp += 1;
+        } else {
+          result.unchanged += 1;
+        }
+      } else {
+        const partId = newId('PRT');
+        const part: Part = {
+          id: partId,
+          name,
+          category: item.category?.trim() || 'Repair Part',
+          brand,
+          model: '',
+          quantity: 0,
+          minQuantity: 0,
+          purchaseCost: 0,
+          sellingPrice: 0,
+          supplierId: '',
+          supplierName: '',
+          consumeMode: 'PART_USED',
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        draft.parts.push(part);
+        if (item.quantity > 0) {
+          applyStockIn(draft, {
+            partId,
+            quantity: item.quantity,
+            type: 'IN',
+            reason: 'Stock import',
+            idempotencyKey: movementKey(),
+            user,
+          });
+        }
+        result.created += 1;
+      }
+      result.total += 1;
+    }
+
+    return result;
+  }).then((result) => ({ data: result.data }));
 }
 
 export async function updatePart(

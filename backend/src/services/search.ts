@@ -19,22 +19,27 @@ export type SearchScope = 'all' | 'billing' | 'stock';
 /**
  * One search box for the whole shop: Order ID, customer name, mobile number,
  * device model or part name. Results are ranked so orders always come first.
+ *
+ * The `billing` scope is a compact "find the old bill" box: only bills that
+ * already exist, matched by order ID / customer name / mobile only, and at
+ * most the 3 most relevant ones. Stock and customer screens appear nowhere.
  */
 export function search(query: string, limit = 20, scope: SearchScope = 'all'): SearchHit[] {
   const q = query.trim().toLowerCase();
   if (q.length < 1) return [];
   const db = read();
   const digits = normalizeMobile(q);
+  const billing = scope === 'billing';
   const scored: (SearchHit & { score: number })[] = [];
 
   for (const order of db.orders) {
-    const score = scoreOrder(order, q, digits);
+    const score = scoreOrder(order, q, digits, billing);
     if (score <= 0) continue;
     scored.push({
       score,
       kind: 'order',
       id: order.id,
-      title: `${order.id} - ${order.customerName}`,
+      title: billing ? order.customerName : `${order.id} - ${order.customerName}`,
       subtitle: [order.brand, order.model].filter(Boolean).join(' ') || order.deviceType,
       status: order.status,
       amount: order.finalAmount,
@@ -44,7 +49,7 @@ export function search(query: string, limit = 20, scope: SearchScope = 'all'): S
   }
 
   for (const part of db.parts) {
-    if (scope === 'billing') break;
+    if (billing) break;
     if (!part.active) continue;
     const score = scorePart(part, q);
     if (score <= 0) continue;
@@ -62,6 +67,7 @@ export function search(query: string, limit = 20, scope: SearchScope = 'all'): S
   }
 
   for (const customer of db.customers) {
+    if (billing) break;
     const score = scoreCustomer(customer, q, digits);
     if (score <= 0) continue;
     const own = db.orders.filter((order) => order.customerId === customer.id);
@@ -83,19 +89,21 @@ export function search(query: string, limit = 20, scope: SearchScope = 'all'): S
 
   return scored
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .slice(0, billing ? Math.min(3, limit) : limit)
     .map(({ score: _score, ...hit }) => hit);
 }
 
-function scoreOrder(order: RepairOrder, q: string, digits: string): number {
+function scoreOrder(order: RepairOrder, q: string, digits: string, billing: boolean): number {
+  if (!billing) {
+    if (order.model.toLowerCase().includes(q)) return 60;
+    if (order.brand.toLowerCase().includes(q)) return 55;
+    if (order.complaint.toLowerCase().includes(q)) return 40;
+  }
   if (order.id.toLowerCase() === q) return 100;
   if (order.id.toLowerCase().includes(q)) return 90;
   if (order.customerName.toLowerCase().startsWith(q)) return 80;
   if (order.customerName.toLowerCase().includes(q)) return 70;
   if (digits.length >= 4 && order.mobile.includes(digits)) return 75;
-  if (order.model.toLowerCase().includes(q)) return 60;
-  if (order.brand.toLowerCase().includes(q)) return 55;
-  if (order.complaint.toLowerCase().includes(q)) return 40;
   return 0;
 }
 

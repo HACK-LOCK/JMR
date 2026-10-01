@@ -37,7 +37,10 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     api
       .get<AuthUser>('/auth/me')
       .then((response) => {
-        if (!cancelled) setUser(response.data);
+        if (!cancelled) {
+          setUser(response.data);
+          void api.post('/supabase/sync').catch(() => undefined);
+        }
       })
       .catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
@@ -71,6 +74,10 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         // A fresh sign-in starts with the dashboard figures put away. The owner
         // brings them back with the PIN, and each new session hides them again.
         hideAllDashboardSections();
+        // Automatically restore all bills and stock from Supabase every time we log in
+        void api.post('/supabase/sync').catch((err) => {
+          console.warn('[auth] Automatic Supabase restore on login notice:', err);
+        });
       },
       signOut: () => {
         clearSession();

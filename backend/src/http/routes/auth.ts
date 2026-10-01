@@ -13,6 +13,7 @@ import {
   stockUnlockSchema,
   userCreateSchema,
 } from '../../validation/schemas';
+import { syncAndRestoreSupabase } from '../../services/supabaseSync';
 
 export const authRouter = Router();
 
@@ -108,6 +109,11 @@ authRouter.post(
       action: 'LOGIN',
       tag: 'Session Login',
     });
+    if (env.supabase.url && env.supabase.publishableKey) {
+      void syncAndRestoreSupabase().catch((err) => {
+        console.warn('[supabase] Auto login sync notice:', err instanceof Error ? err.message : err);
+      });
+    }
     sendData(res, { token: signToken(authUser), user: authUser });
   }),
 );

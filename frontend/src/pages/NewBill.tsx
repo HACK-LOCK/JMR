@@ -26,6 +26,7 @@ import {
 import { DEVICE_CONDITIONS, DEVICE_TYPES, PAYMENT_MODES } from '@shared/domain';
 import { dateOnly, isValidMobile, mobileOnly, money, plusDaysIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { downloadProtectedFile } from '@/lib/api';
 import { directSaveBillToSupabase } from '@/lib/supabase';
 
 interface FormState {
@@ -156,6 +157,12 @@ export default function NewBill(): JSX.Element {
       if (response.warning) toast.warning(response.warning.message);
       else toast.success('Bill saved', `${response.data.id} is ready.`);
       void directSaveBillToSupabase(response.data);
+      // Automatically download the bill PDF when save bill button is clicked
+      void downloadProtectedFile(`/orders/${response.data.id}/bill.pdf`, `${response.data.id}.pdf`).catch(
+        (dlErr) => {
+          console.warn('[download] Auto download bill PDF notice:', dlErr);
+        },
+      );
       navigate(`/orders/${response.data.id}`);
     } catch (error) {
       toast.error('Could not save the bill', error instanceof Error ? error.message : undefined);

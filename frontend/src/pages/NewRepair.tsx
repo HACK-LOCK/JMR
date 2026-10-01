@@ -19,6 +19,7 @@ import {
 import { DEVICE_CONDITIONS, DEVICE_TYPES, PAYMENT_MODES } from '@shared/domain';
 import { isValidMobile, mobileOnly, money, plusDaysIso } from '@/lib/format';
 import { round2 } from '@shared/domain';
+import { downloadProtectedFile } from '@/lib/api';
 import { directSaveBillToSupabase } from '@/lib/supabase';
 
 interface FormState {
@@ -180,6 +181,12 @@ export default function NewRepair(): JSX.Element {
       if (response.warning) toast.warning(response.warning.message);
       else toast.success('Repair saved', `${response.data.id} is ready.`);
       void directSaveBillToSupabase(response.data);
+      // Automatically download the bill PDF when save is clicked
+      void downloadProtectedFile(`/orders/${response.data.id}/bill.pdf`, `${response.data.id}.pdf`).catch(
+        (dlErr) => {
+          console.warn('[download] Auto download bill PDF notice:', dlErr);
+        },
+      );
       // New repair details open in edit mode: staff often mistype the complaint.
       navigate(`/orders/${response.data.id}?new=1`);
     } catch (error) {

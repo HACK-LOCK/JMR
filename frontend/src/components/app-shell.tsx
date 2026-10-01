@@ -11,6 +11,7 @@ import {
   Package,
   PackagePlus,
   PlusCircle,
+  RefreshCw,
   Search,
   Settings,
   Sun,
@@ -18,10 +19,13 @@ import {
   X,
 } from 'lucide-react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { useSettings } from '@/hooks/use-queries';
+import { useSettings, type SupabaseSyncResponse } from '@/hooks/use-queries';
 import { useTheme } from '@/lib/theme';
 import { useStockAccess } from '@/lib/stock-access';
+import { useToast } from '@/components/ui/toast';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet } from '@/components/ui/sheet';
@@ -153,6 +157,28 @@ function MenuItems({
   onSideChange?: (s: SideKey) => void;
   onOpenLogs?: () => void;
 }): JSX.Element {
+  const [syncing, setSyncing] = useState(false);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    toast.info('Syncing with Supabase...', 'Restoring bills and updating cloud backup.');
+    try {
+      const res = await api.post<SupabaseSyncResponse>('/supabase/sync');
+      await queryClient.invalidateQueries();
+      toast.success(
+        'Supabase sync complete',
+        `${res.data.ordersCount} bills, ${res.data.partsCount} stock items verified and up to date.`,
+      );
+    } catch (err) {
+      toast.error('Sync failed', err instanceof Error ? err.message : 'Please check internet and try again.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <>
       {/* Billing / Stock switcher — shown only in the mobile 3-dot menu */}
@@ -192,6 +218,12 @@ function MenuItems({
       ) : null}
       <MenuItem icon={ClipboardList} label="Bill History" onClick={() => onPick('/bill-history')} />
       <MenuItem icon={Users} label="Customers" onClick={() => onPick('/customers')} />
+      <MenuItem
+        icon={RefreshCw}
+        label={syncing ? 'Syncing Supabase...' : 'Sync with Supabase'}
+        spinning={syncing}
+        onClick={() => void handleSync()}
+      />
       {onOpenLogs ? (
         <MenuItem icon={History} label="Log / Edit History" onClick={onOpenLogs} />
       ) : null}
@@ -376,11 +408,13 @@ function MenuItem({
   label,
   onClick,
   tone = 'default',
+  spinning = false,
 }: {
   icon: typeof ClipboardList;
   label: string;
   onClick: () => void;
   tone?: 'default' | 'destructive';
+  spinning?: boolean;
 }): JSX.Element {
   return (
     <button
@@ -392,7 +426,7 @@ function MenuItem({
         tone === 'destructive' ? 'text-destructive' : 'text-foreground',
       )}
     >
-      <Icon className="h-4 w-4 shrink-0" />
+      <Icon className={cn('h-4 w-4 shrink-0', spinning && 'animate-spin')} />
       {label}
     </button>
   );
@@ -501,6 +535,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
               </p>
             </div>
             <ThemeToggle />
+            {/* <HeaderMenu onSignOut={handleSignOut} /> */}
             <HeaderMenu
               onSignOut={handleSignOut}
               side={activeSide}

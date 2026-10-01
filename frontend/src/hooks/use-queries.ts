@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { OrderStatus } from '@shared/domain';
 import { api, type Envelope } from '@/lib/api';
 import type {
@@ -185,6 +185,38 @@ export const useSyncDatasets = () =>
     queryKey: ['sync', 'datasets'],
     queryFn: ({ signal }) => unwrap<DatasetLabels[]>('/sync/datasets', signal),
   });
+
+export interface SupabaseSyncResponse {
+  ordersCount: number;
+  customersCount: number;
+  partsCount: number;
+  suppliersCount: number;
+  paymentsCount: number;
+  stockMovementsCount: number;
+  restoredFromSupabase: boolean;
+  errors: string[];
+}
+
+export function useSupabaseSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api.post<SupabaseSyncResponse>('/supabase/sync');
+      return res.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries();
+    },
+  });
+}
+
+export async function triggerSupabaseSync(queryClient?: QueryClient): Promise<SupabaseSyncResponse> {
+  const res = await api.post<SupabaseSyncResponse>('/supabase/sync');
+  if (queryClient) {
+    void queryClient.invalidateQueries();
+  }
+  return res.data;
+}
 
 /**
  * Brands and models this shop has repaired, for the new bill screen.

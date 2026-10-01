@@ -4,6 +4,7 @@ import { NotFoundError } from '../core/errors';
 import { mutate, read, type MutationResult } from '../data/mutate';
 import type { z } from 'zod';
 import type { supplierCreateSchema } from '../validation/schemas';
+import { deleteSupplierFromSupabase, syncSupplierToSupabase } from './supabaseSync';
 
 type SupplierInput = z.infer<typeof supplierCreateSchema>;
 
@@ -51,6 +52,9 @@ export async function createSupplier(input: SupplierInput): Promise<MutationResu
   return mutate((draft) => {
     draft.suppliers.push(supplier);
     return supplier;
+  }).then((result) => {
+    void syncSupplierToSupabase(result.data.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -63,6 +67,9 @@ export async function updateSupplier(id: string, patch: Partial<SupplierInput>):
     if (patch.notes !== undefined) supplier.notes = patch.notes;
     supplier.updatedAt = nowIso();
     return supplier;
+  }).then((result) => {
+    void syncSupplierToSupabase(result.data.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -80,5 +87,8 @@ export async function deleteSupplier(id: string): Promise<MutationResult<{ id: s
       }
     });
     return { id };
+  }).then((result) => {
+    void deleteSupplierFromSupabase(result.data.id).catch(() => undefined);
+    return result;
   });
 }

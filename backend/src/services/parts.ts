@@ -11,6 +11,11 @@ import { mutate, read, type MutationResult } from '../data/mutate';
 import { applyAdjust, applyStockIn, applyStockOut, applyReturn } from '../domain/stockOps';
 import type { z } from 'zod';
 import type { partCreateSchema, stockImportSchema } from '../validation/schemas';
+import {
+  syncAllStockToSupabase,
+  syncPartToSupabase,
+  syncStockMovementToSupabase,
+} from './supabaseSync';
 
 type PartInput = z.infer<typeof partCreateSchema>;
 
@@ -132,10 +137,13 @@ export async function createPart(
       });
     }
     return part.id;
-  }).then((result) => ({
-    data: getPart(result.data),
-    ...(result.warning ? { warning: result.warning } : {}),
-  }));
+  }).then((result) => {
+    void syncPartToSupabase(result.data).catch(() => undefined);
+    return {
+      data: getPart(result.data),
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
+  });
 }
 
 export interface StockImportResult {
@@ -234,7 +242,10 @@ export async function importParts(
     }
 
     return result;
-  }).then((result) => ({ data: result.data }));
+  }).then((result) => {
+    void syncAllStockToSupabase().catch(() => undefined);
+    return { data: result.data };
+  });
 }
 
 export async function updatePart(
@@ -263,10 +274,13 @@ export async function updatePart(
     }
     part.updatedAt = nowIso();
     return part.id;
-  }).then((result) => ({
-    data: getPart(result.data),
-    ...(result.warning ? { warning: result.warning } : {}),
-  }));
+  }).then((result) => {
+    void syncPartToSupabase(result.data).catch(() => undefined);
+    return {
+      data: getPart(result.data),
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
+  });
 }
 
 /**
@@ -281,6 +295,9 @@ export async function deletePart(id: string): Promise<MutationResult<{ id: strin
     part.active = false;
     part.updatedAt = nowIso();
     return { id };
+  }).then((result) => {
+    void syncPartToSupabase(result.data.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -291,6 +308,10 @@ export async function stockIn(
   return mutate((draft) => {
     const { movement, part } = applyStockIn(draft, { ...input, type: 'IN', user });
     return { movement, part };
+  }).then((result) => {
+    void syncPartToSupabase(result.data.part.id).catch(() => undefined);
+    void syncStockMovementToSupabase(result.data.movement.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -307,6 +328,10 @@ export async function stockOut(
   return mutate((draft) => {
     const { movement, part } = applyStockOut(draft, { ...input, type: 'OUT', user });
     return { movement, part };
+  }).then((result) => {
+    void syncPartToSupabase(result.data.part.id).catch(() => undefined);
+    void syncStockMovementToSupabase(result.data.movement.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -317,6 +342,10 @@ export async function stockReturn(
   return mutate((draft) => {
     const { movement, part } = applyReturn(draft, { ...input, type: 'RETURN', user });
     return { movement, part };
+  }).then((result) => {
+    void syncPartToSupabase(result.data.part.id).catch(() => undefined);
+    void syncStockMovementToSupabase(result.data.movement.id).catch(() => undefined);
+    return result;
   });
 }
 
@@ -327,6 +356,10 @@ export async function stockAdjust(
   return mutate((draft) => {
     const { movement, part } = applyAdjust(draft, { ...input, user });
     return { movement, part };
+  }).then((result) => {
+    void syncPartToSupabase(result.data.part.id).catch(() => undefined);
+    void syncStockMovementToSupabase(result.data.movement.id).catch(() => undefined);
+    return result;
   });
 }
 

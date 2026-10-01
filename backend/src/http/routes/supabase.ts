@@ -1,7 +1,12 @@
 import { Router } from 'express';
-import { requireAuth, requireOwner } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import { asyncRoute, param, sendData } from '../middleware/respond';
-import { syncAllToSupabase, syncOrderToSupabase, testSupabase } from '../../services/supabaseSync';
+import {
+  syncAllToSupabase,
+  syncAndRestoreSupabase,
+  syncOrderToSupabase,
+  testSupabase,
+} from '../../services/supabaseSync';
 
 export const supabaseRouter = Router();
 supabaseRouter.use(requireAuth);
@@ -20,9 +25,26 @@ supabaseRouter.post(
   }),
 );
 
+/**
+ * Full bidirectional sync & restore.
+ * Called automatically on login and manually via 3-dot menu.
+ */
 supabaseRouter.post(
   '/supabase/sync',
-  requireOwner,
+  asyncRoute(async (_req, res) => {
+    sendData(res, await syncAndRestoreSupabase());
+  }),
+);
+
+supabaseRouter.post(
+  '/supabase/restore',
+  asyncRoute(async (_req, res) => {
+    sendData(res, await syncAndRestoreSupabase());
+  }),
+);
+
+supabaseRouter.post(
+  '/supabase/push',
   asyncRoute(async (_req, res) => {
     sendData(res, await syncAllToSupabase());
   }),

@@ -3,6 +3,7 @@ import { env } from './config/env';
 import { getStore, initStore } from './data';
 import { userStore, initUsers } from './data/userStore';
 import { isGoogleReady } from './google/client';
+import { syncAndRestoreSupabase } from './services/supabaseSync';
 
 function describeStore(): string {
   const store = getStore();
@@ -18,6 +19,19 @@ async function main(): Promise<void> {
   // one, so the connection has to be known before they are opened.
   await initStore();
   await initUsers();
+
+  // Restore bills & stock from Supabase on startup so data is never lost across server restarts
+  if (env.supabase.url && env.supabase.publishableKey) {
+    void syncAndRestoreSupabase()
+      .then((res) => {
+        console.log(
+          `[supabase] Cloud sync ready: ${res.ordersCount} orders, ${res.partsCount} parts restored/verified.`,
+        );
+      })
+      .catch((err) => {
+        console.warn('[supabase] Startup cloud sync notice:', err instanceof Error ? err.message : err);
+      });
+  }
 
   const app = createApp();
   app.listen(env.port, () => {

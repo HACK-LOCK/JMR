@@ -23,15 +23,14 @@ function readStoredTheme(): Theme | null {
   }
 }
 
-/** Dark for anyone whose phone is already in dark mode, light otherwise. */
+/**
+ * Light mode is primary and pre-selected by default.
+ * Dark mode is secondary, only activated if the user explicitly selects it.
+ */
 function preferredTheme(): Theme {
   const stored = readStoredTheme();
   if (stored) return stored;
-  try {
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch {
-    return 'light';
-  }
+  return 'light';
 }
 
 function paint(theme: Theme): void {

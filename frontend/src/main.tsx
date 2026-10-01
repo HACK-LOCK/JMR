@@ -42,6 +42,39 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
 }
 registerSW({ immediate: true });
 
+// Restrict zoom in / zoom out across devices (mobile pinch, Safari gestures, Ctrl+scroll/keys)
+if (typeof window !== 'undefined') {
+  document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+
+  window.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    },
+    { passive: false },
+  );
+
+  window.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    },
+    { passive: false },
+  );
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) {
+      e.preventDefault();
+    }
+  });
+}
+
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element missing');
 

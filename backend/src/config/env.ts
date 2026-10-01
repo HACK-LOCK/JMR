@@ -127,6 +127,11 @@ export const env = {
   jwtSecret: str('JWT_SECRET', 'insecure-dev-secret-change-me'),
   corsOrigins: list('CORS_ORIGINS'),
 
+  supabase: {
+    url: str('SUPABASE_URL'),
+    publishableKey: str('SUPABASE_PUBLISHABLE_KEY'),
+  },
+
   /**
    * The online store. When a connection string is present this database - not
    * Google Sheets - holds the bills, and the app refuses to start if it cannot

@@ -64,6 +64,7 @@
   html {
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
+    touch-action: pan-x pan-y;
   }
 
   body {
@@ -71,6 +72,7 @@
     font-family: theme('fontFamily.sans');
     /* Nothing in a shop app should be selectable-by-accident while tapping. */
     overscroll-behavior-y: none;
+    touch-action: pan-x pan-y;
   }
 
   /* Keep number inputs friendly on a phone. */

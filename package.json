@@ -26,7 +26,8 @@
     "seed": "npm run seed --workspace backend",
     "db:setup": "npm run db:setup --workspace backend",
     "db:check": "npm run db:check --workspace backend",
-    "test:supabase": "node --dns-result-order=ipv4first frontend/scripts/test-supabase.mjs"
+    "test:supabase": "node --dns-result-order=ipv4first frontend/scripts/test-supabase.mjs",
+    "test:supabase:storage": "node --dns-result-order=ipv4first scripts/test-supabase-storage.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

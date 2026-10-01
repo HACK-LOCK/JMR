@@ -13,6 +13,7 @@ import { photosRouter } from './http/routes/photos';
 import { settingsRouter, syncRouter } from './http/routes/settings';
 import { suppliersRouter } from './http/routes/suppliers';
 import { deviceLogsRouter } from './http/routes/deviceLogs';
+import { supabaseRouter } from './http/routes/supabase';
 import { errorHandler, notFound } from './http/middleware/respond';
 
 export function createApp(): Express {
@@ -53,6 +54,7 @@ export function createApp(): Express {
   app.use('/api', settingsRouter);
   app.use('/api', syncRouter);
   app.use('/api', deviceLogsRouter);
+  app.use('/api', supabaseRouter);
 
   app.use('/api', notFound);
 

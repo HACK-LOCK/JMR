@@ -33,6 +33,7 @@ import {
 } from '../domain/stockOps';
 import { findOrCreateCustomer } from './customers';
 import { ensureBill } from './bills';
+import { syncAllToSupabase, syncOrderToSupabase } from './supabaseSync';
 import type { z } from 'zod';
 import type { orderCreateSchema, orderUpdateSchema } from '../validation/schemas';
 
@@ -416,6 +417,14 @@ export async function createOrder(
     warnings.push({ code: 'BILL_PENDING', message: `Order saved. ${bill.message}` });
   }
 
+  try {
+    await syncOrderToSupabase(result.data);
+  } catch (err) {
+    console.warn('[supabase] Sync error for new bill:', err);
+  }
+  // Auto sync all records to keep Supabase completely synchronized
+  void syncAllToSupabase().catch(() => undefined);
+
   return warnings[0]
     ? { data: getOrderDetail(result.data), warning: warnings[0] }
     : { data: getOrderDetail(result.data) };
@@ -511,6 +520,10 @@ function mergeBill(
   billSaved: boolean,
   message: string,
 ): { data: OrderWithParts; warning?: { code: string; message: string } } {
+  void syncOrderToSupabase(orderId).catch((err) => {
+    console.warn('[supabase] Background sync error on order update:', err);
+  });
+  void syncAllToSupabase().catch(() => undefined);
   const data = getOrderDetail(orderId);
   const warning =
     result.warning ?? (!billSaved && message ? { code: 'BILL_PENDING', message } : undefined);
@@ -576,10 +589,13 @@ export async function returnOrderPartStock(
   return mutate((draft) => {
     returnOrderPart(draft, { orderId, lineId, user });
     return { id: orderId };
-  }).then((result) => ({
-    data: getOrderDetail(orderId),
-    ...(result.warning ? { warning: result.warning } : {}),
-  }));
+  }).then((result) => {
+    void syncOrderToSupabase(orderId).catch(() => undefined);
+    return {
+      data: getOrderDetail(orderId),
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -623,10 +639,13 @@ export async function deletePayment(
   return mutate((draft) => {
     removePayment(draft, { orderId, paymentId });
     return { id: orderId };
-  }).then((result) => ({
-    data: getOrderDetail(orderId),
-    ...(result.warning ? { warning: result.warning } : {}),
-  }));
+  }).then((result) => {
+    void syncOrderToSupabase(orderId).catch(() => undefined);
+    return {
+      data: getOrderDetail(orderId),
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
+  });
 }
 
 export async function deliver(

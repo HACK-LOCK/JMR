@@ -1,5 +1,17 @@
 import { useEffect, useState } from 'react';
-import { KeyRound, LogOut, Save, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Cloud,
+  Database,
+  KeyRound,
+  LogOut,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { PageHeader } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +23,8 @@ import { Sheet } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/lib/auth';
+import { request } from '@/lib/api';
+import { getSupabaseInfo, testSupabaseConnection } from '@/lib/supabase';
 import {
   useChangePassword,
   useCreateUser,
@@ -255,6 +269,8 @@ export default function Settings(): JSX.Element {
           </InlineNotice>
         </CardContent>
       </Card>
+
+      <SupabaseCard isOwner={isOwner} />
 
       <Card>
         <CardHeader>
@@ -503,6 +519,143 @@ function AddUserSheet({
         </Button>
       </div>
     </Sheet>
+  );
+}
+
+function SupabaseCard({ isOwner }: { isOwner: boolean }): JSX.Element {
+  const toast = useToast();
+  const info = getSupabaseInfo();
+  const [testing, setTesting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [status, setStatus] = useState<{
+    connected: boolean;
+    tablesReady?: boolean;
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    void testSupabaseConnection().then(setStatus);
+  }, []);
+
+  const handleTest = async (): Promise<void> => {
+    setTesting(true);
+    try {
+      const res = await testSupabaseConnection();
+      setStatus(res);
+      if (res.success && res.tablesReady) {
+        toast.success('Supabase Connected', 'Bills are actively synced with Supabase.');
+      } else if (res.success) {
+        toast.warning('Schema Setup Needed', res.message);
+      } else {
+        toast.error('Connection Failed', res.message);
+      }
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSync = async (): Promise<void> => {
+    setSyncing(true);
+    try {
+      const res = await request<{ ordersCount: number; customersCount: number; paymentsCount: number; errors: string[] }>(
+        '/supabase/sync',
+        { method: 'POST' },
+      );
+      if (res.data.errors && res.data.errors.length > 0) {
+        toast.warning('Synced with warnings', res.data.errors[0]);
+      } else {
+        toast.success(
+          'Supabase Synced',
+          `${res.data.ordersCount} bills, ${res.data.customersCount} customers synced.`,
+        );
+      }
+    } catch (err) {
+      toast.error('Sync failed', err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <Card className="border-primary/20">
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5 text-primary" /> Supabase Cloud Database
+          </CardTitle>
+          {status?.connected && status?.tablesReady ? (
+            <Badge variant="success" className="gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Connected
+            </Badge>
+          ) : status?.connected ? (
+            <Badge variant="warning" className="gap-1">
+              <AlertCircle className="h-3.5 w-3.5" /> Setup Needed
+            </Badge>
+          ) : (
+            <Badge variant="secondary">Offline</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Stores all bills, customers, payments, and repair records online in your Supabase project.
+        </p>
+
+        <div className="space-y-1.5 rounded-xl bg-secondary/60 p-3 text-xs">
+          <div className="flex justify-between gap-2">
+            <span className="text-muted-foreground">Project URL:</span>
+            <span className="font-mono font-medium truncate max-w-[240px]">{info.url || 'Not configured'}</span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span className="text-muted-foreground">Publishable Key:</span>
+            <span className="font-mono font-medium">{info.keyPreview || 'Not configured'}</span>
+          </div>
+          {status ? (
+            <div className="mt-2 border-t border-border/50 pt-2 text-2xs text-muted-foreground">
+              {status.message}
+            </div>
+          ) : null}
+        </div>
+
+        {status && !status.tablesReady && status.connected ? (
+          <InlineNotice tone="warning">
+            Tables not created in Supabase yet. Run the <code>supabase-schema.sql</code> script in your{' '}
+            <a
+              href="https://supabase.com/dashboard/project/uvyszkdszzadoycbmeiy/sql/new"
+              target="_blank"
+              rel="noreferrer"
+              className="font-bold underline text-primary"
+            >
+              Supabase SQL Editor
+            </a>{' '}
+            to complete table setup.
+          </InlineNotice>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            loading={testing}
+            onClick={() => void handleTest()}
+            className="gap-1.5"
+          >
+            <RefreshCw className={cn2('h-4 w-4', testing && 'animate-spin')} /> Test Connection
+          </Button>
+          {isOwner ? (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={syncing}
+              onClick={() => void handleSync()}
+              className="gap-1.5"
+            >
+              <Cloud className="h-4 w-4" /> Sync All Bills
+            </Button>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

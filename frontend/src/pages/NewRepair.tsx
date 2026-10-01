@@ -18,8 +18,8 @@ import {
 } from '@/hooks/use-queries';
 import { DEVICE_CONDITIONS, DEVICE_TYPES, PAYMENT_MODES } from '@shared/domain';
 import { isValidMobile, mobileOnly, money, plusDaysIso } from '@/lib/format';
-import { cn } from '@/lib/utils';
 import { round2 } from '@shared/domain';
+import { directSaveBillToSupabase } from '@/lib/supabase';
 
 interface FormState {
   customerName: string;
@@ -179,6 +179,7 @@ export default function NewRepair(): JSX.Element {
       const response = await createOrder.mutateAsync(payload);
       if (response.warning) toast.warning(response.warning.message);
       else toast.success('Repair saved', `${response.data.id} is ready.`);
+      void directSaveBillToSupabase(response.data);
       // New repair details open in edit mode: staff often mistype the complaint.
       navigate(`/orders/${response.data.id}?new=1`);
     } catch (error) {
